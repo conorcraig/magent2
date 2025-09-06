@@ -1,0 +1,21 @@
+# venv
+.venv/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# environment
+.env
+
+# OS
+.DS_Store
+
+# coverage (future)
+.coverage
+htmlcov/
