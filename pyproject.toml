@@ -23,8 +23,12 @@ line-ending = "auto"
 select = ["E", "F", "I", "UP"]
 ignore = []
 
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.mypy]
 python_version = "3.12"
+files = ["magent2", "scripts"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
