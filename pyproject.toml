@@ -44,6 +44,7 @@ python_files = ["test_*.py"]
 [dependency-groups]
 dev = [
     "mypy>=1.17.1",
+    "mypy-baseline>=0.7.3",
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.1.0",
@@ -51,4 +52,5 @@ dev = [
     "pytest-randomly>=3.16.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.12.12",
+    "xenon>=0.9.3",
 ]
