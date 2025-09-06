@@ -19,3 +19,6 @@ __pycache__/
 # coverage (future)
 .coverage
 htmlcov/
+
+# test artifacts
+reports/
