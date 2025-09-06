@@ -23,12 +23,8 @@ line-ending = "auto"
 select = ["E", "F", "I", "UP"]
 ignore = []
 
-[tool.ruff.lint.mccabe]
-max-complexity = 10
-
 [tool.mypy]
 python_version = "3.12"
-files = ["magent2", "scripts"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
@@ -39,7 +35,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-qq --disable-warnings --show-capture=no --tb=no -r fE"
 python_files = ["test_*.py"]
 
 [dependency-groups]
