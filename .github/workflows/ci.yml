@@ -34,12 +34,18 @@ jobs:
         run: uv run ruff check
 
       - name: Mypy
-        run: uv run mypy
+        run: |
+          # Filter through mypy-baseline if baseline file exists
+          if [ -f mypy-baseline.txt ]; then
+            uv run mypy | uv run mypy-baseline filter
+          else
+            uv run mypy
+          fi
 
       - name: Pytest
         run: |
           mkdir -p reports
-          uv run pytest --junitxml=reports/junit.xml --report-log=reports/pytest-report.jsonl
+          uv run pytest --junitxml=reports/junit.xml --json-report --json-report-file=reports/pytest-report.json
 
       - name: Upload test artifacts
         if: always()
@@ -47,3 +53,8 @@ jobs:
         with:
           name: test-reports
           path: reports/
+
+      - name: Xenon complexity gate
+        run: |
+          # Fail if any function exceeds B, and keep module/avg at A
+          uv run xenon --max-absolute B --max-modules A --max-average A magent2 scripts
