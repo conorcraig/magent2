@@ -26,18 +26,27 @@ MYPY_STATUS=$?
 set -e
 
 printf "%s\n" "${MYPY_OUTPUT}" > reports/mypy-full.txt
+echo "[type_check] Full mypy output written to reports/mypy-full.txt"
+
+# If mypy itself failed to execute, surface immediately (before filtering)
+if [[ ${MYPY_STATUS} -ne 0 && -z "${MYPY_OUTPUT}" ]]; then
+  echo "[type_check] mypy exited non-zero and produced no output."
+  echo "[type_check] Please open reports/mypy-full.txt for diagnostics."
+  exit ${MYPY_STATUS}
+fi
 
 # Pipe through mypy-baseline filter. Locally, ignore purely "fixed" diffs so progress stays green.
 if [[ -z "${CI-}" ]]; then
-  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --allow-unsynced --baseline-path "${BASELINE_PATH}" --sort-baseline
-  FILTER_STATUS=$?
+  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --allow-unsynced --baseline-path "${BASELINE_PATH}" --sort-baseline | tee reports/mypy-filtered.txt
+  FILTER_STATUS=${PIPESTATUS[1]}
 else
-  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --baseline-path "${BASELINE_PATH}" --sort-baseline
-  FILTER_STATUS=$?
+  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --baseline-path "${BASELINE_PATH}" --sort-baseline | tee reports/mypy-filtered.txt
+  FILTER_STATUS=${PIPESTATUS[1]}
 fi
 
 if [[ ${FILTER_STATUS} -ne 0 ]]; then
   echo "[type_check] mypy-baseline detected baseline drift (regression or improvement)."
+  echo "[type_check] Filtered output saved to reports/mypy-filtered.txt"
   echo "[type_check] To sync the baseline after fixing or intentionally accepting improvements, run:"
   echo "[type_check]   bash .github/scripts/ci/update_type_baseline.sh"
   exit ${FILTER_STATUS}
