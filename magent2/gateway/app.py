@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import StreamingResponse
+
+from magent2.bus.interface import Bus, BusMessage
+
+
+def create_app(bus: Bus) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/send")
+    async def send(message: dict[str, Any]) -> dict[str, Any]:
+        # Validate minimal shape via required fields
+        try:
+            conversation_id = str(message["conversation_id"])  # noqa: F841
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=400, detail="invalid envelope") from exc
+
+        topic = f"chat:{message['conversation_id']}"
+        bus.publish(topic, BusMessage(topic=topic, payload=message))
+        return {"status": "ok", "topic": topic}
+
+    @app.get("/stream/{conversation_id}")
+    async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+        topic = f"stream:{conversation_id}"
+
+        async def event_gen() -> Any:
+            last_id: str | None = None
+            sent = 0
+            # Simple polling loop over Bus.read
+            while True:
+                items = list(bus.read(topic, last_id=last_id, limit=100))
+                if items:
+                    for m in items:
+                        data = json.dumps(m.payload)
+                        yield f"data: {data}\n\n"
+                        last_id = m.id
+                        sent += 1
+                        if max_events is not None and sent >= max_events:
+                            return
+                # avoid tight loop
+                await asyncio.sleep(0.02)
+
+        return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+    return app
