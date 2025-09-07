@@ -19,10 +19,11 @@ def _setenv(monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
         monkeypatch.setenv(k, v)
 
 
-def test_blocks_disallowed_command(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disallowed_command_returns_failure_string(monkeypatch: pytest.MonkeyPatch) -> None:
     _setenv(monkeypatch, TERMINAL_ALLOWED_COMMANDS="echo")
-    with pytest.raises(PermissionError):
-        terminal_run("bash -lc 'echo hi'")
+    out = terminal_run("bash -lc 'echo hi'")
+    assert out.startswith("ok=false ")
+    assert "error:\n" in out
 
 
 def test_allows_allowed_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,3 +73,11 @@ def test_redaction_via_env_and_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "[REDACTED]" in out
     assert token not in out
     assert secret not in out
+
+
+def test_returns_failure_string_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No allowed commands configured -> PermissionError -> function should return failure string
+    monkeypatch.delenv("TERMINAL_ALLOWED_COMMANDS", raising=False)
+    out = terminal_run("echo hello")
+    assert out.startswith("ok=false ")
+    assert "error:\n" in out

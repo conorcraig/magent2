@@ -8,7 +8,7 @@ from typing import Any
 from .tool import TerminalTool
 
 
-@dataclass
+@dataclass(slots=True)
 class TerminalPolicy:
     allowed_commands: list[str]
     timeout_seconds: float
@@ -50,6 +50,27 @@ def _load_policy_from_env() -> TerminalPolicy:
     )
 
 
+def _redact_label_values(text: str) -> str:
+    """Redact values that follow common sensitive labels while preserving labels.
+
+    Examples matched: "api_key: VALUE", "token=VALUE".
+    """
+    patterns = [
+        r"(?i)\b(api_key|authorization|token|password|secret)\b\s*[:=]\s*\S+",
+    ]
+    redacted = text
+    for pat in patterns:
+        try:
+            redacted = re.sub(
+                pat,
+                lambda m: re.sub(r"([:=]\s*)\S+", r"\1[REDACTED]", m.group(0)),
+                redacted,
+            )
+        except re.error:
+            continue
+    return redacted
+
+
 def _redact_text(text: str, substrings: list[str], patterns: list[str]) -> str:
     redacted = text
     for s in substrings:
@@ -61,6 +82,8 @@ def _redact_text(text: str, substrings: list[str], patterns: list[str]) -> str:
         except re.error:
             # Ignore invalid regex patterns from configuration
             continue
+    # Also redact values attached to sensitive labels
+    redacted = _redact_label_values(redacted)
     return redacted
 
 
@@ -79,22 +102,28 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         output_cap_bytes=policy.output_cap_bytes,
     )
 
-    result: dict[str, Any] = tool.run(command, cwd=cwd)
+    try:
+        result: dict[str, Any] = tool.run(command, cwd=cwd)
 
-    combined = result.get("stdout", "")
-    combined = _redact_text(combined, policy.redact_substrings, policy.redact_patterns)
-    concise = combined[: policy.function_output_max_chars]
+        combined = result.get("stdout", "")
+        combined = _redact_text(combined, policy.redact_substrings, policy.redact_patterns)
+        concise = combined[: policy.function_output_max_chars]
 
-    def _b(v: Any) -> str:
-        return str(bool(v)).lower()
+        def _b(v: Any) -> str:
+            return str(bool(v)).lower()
 
-    status = (
-        f"ok={_b(result.get('ok'))} "
-        f"exit={result.get('exit_code')} "
-        f"timeout={_b(result.get('timeout'))} "
-        f"truncated={_b(result.get('truncated'))}"
-    )
-    return f"{status}\noutput:\n{concise}"
+        status = (
+            f"ok={_b(result.get('ok'))} "
+            f"exit={result.get('exit_code')} "
+            f"timeout={_b(result.get('timeout'))} "
+            f"truncated={_b(result.get('truncated'))}"
+        )
+        return f"{status}\noutput:\n{concise}"
+    except Exception as exc:  # noqa: BLE001
+        # Convert exceptions into a concise, redacted failure string
+        msg = _redact_text(str(exc), policy.redact_substrings, policy.redact_patterns)
+        concise_err = msg[: policy.function_output_max_chars]
+        return "ok=false exit=None timeout=false truncated=false\nerror:\n" + concise_err
 
 
 __all__ = [
