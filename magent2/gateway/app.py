@@ -13,6 +13,10 @@ from magent2.bus.interface import Bus, BusMessage
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
 
+    @app.get("/health")
+    async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
+        return {"status": "ok"}
+
     @app.post("/send")
     async def send(message: dict[str, Any]) -> dict[str, Any]:
         # Validate minimal shape via required fields

@@ -73,7 +73,8 @@ class Worker:
         stream_topic = f"stream:{envelope.conversation_id}"
         for event in self._runner.stream_run(envelope):
             if isinstance(event, BaseStreamEvent):
-                payload: dict[str, Any] = event.model_dump()
+                # JSON mode ensures datetimes and other types are serialized safely
+                payload: dict[str, Any] = event.model_dump(mode="json")
             else:
                 # The runner protocol guarantees dict[str, Any] for non-BaseStreamEvent
                 payload = event
