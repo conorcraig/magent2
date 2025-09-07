@@ -1,30 +1,12 @@
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from collections.abc import Generator
 
 import pytest
-import redis
 
 from magent2.tools.todo.redis_store import RedisTodoStore
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-
-def _redis_available(url: str) -> bool:
-    try:
-        client = redis.Redis.from_url(url)
-        return bool(client.ping())
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _redis_available(REDIS_URL),
-    reason=("Redis not available. Start it with `docker compose up -d` or set REDIS_URL."),
-)
 
 
 @pytest.fixture()
@@ -33,15 +15,17 @@ def key_prefix() -> str:
 
 
 @pytest.fixture()
-def store(key_prefix: str) -> Generator[RedisTodoStore, None, None]:
+def store(key_prefix: str, redis_url: str) -> Generator[RedisTodoStore, None, None]:
     # Import here to keep tests importable before implementation lands
     from magent2.tools.todo.redis_store import RedisTodoStore
 
-    s = RedisTodoStore(url=REDIS_URL, key_prefix=key_prefix)
+    s = RedisTodoStore(url=redis_url, key_prefix=key_prefix)
     yield s
 
 
-def test_create_and_get_persists_across_instances(store: RedisTodoStore, key_prefix: str) -> None:
+def test_create_and_get_persists_across_instances(
+    store: RedisTodoStore, key_prefix: str, redis_url: str
+) -> None:
     from magent2.tools.todo.redis_store import RedisTodoStore
 
     t = store.create_task(conversation_id="conv_a", title="Write tests")
@@ -54,7 +38,7 @@ def test_create_and_get_persists_across_instances(store: RedisTodoStore, key_pre
     assert fetched.completed is False
 
     # Recreate store to simulate process restart
-    store2 = RedisTodoStore(url=REDIS_URL, key_prefix=key_prefix)
+    store2 = RedisTodoStore(url=redis_url, key_prefix=key_prefix)
     fetched2 = store2.get_task(t.id)
     assert fetched2 is not None
     assert fetched2.id == t.id

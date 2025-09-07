@@ -64,7 +64,8 @@ class RedisTodoStore(TodoStore):
         self, *, conversation_id: str, title: str, metadata: dict | None = None
     ) -> Task:
         task = Task(conversation_id=conversation_id, title=title, metadata=metadata or {})
-        data = task.model_dump()
+        # Use JSON mode to ensure datetimes are RFC3339 strings (JSON-serializable)
+        data = task.model_dump(mode="json")
         payload = json.dumps(data, separators=(",", ":"))
         p = self._redis.pipeline()
         p.hset(self._task_key(task.id), mapping={"json": payload})
@@ -111,7 +112,7 @@ class RedisTodoStore(TodoStore):
             current.completed = completed
         if metadata is not None:
             current.metadata = metadata
-        payload = json.dumps(current.model_dump(), separators=(",", ":"))
+        payload = json.dumps(current.model_dump(mode="json"), separators=(",", ":"))
         self._redis.hset(self._task_key(task_id), mapping={"json": payload})
         return current
 
