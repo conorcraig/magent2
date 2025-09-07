@@ -235,3 +235,90 @@ References: OpenAI platform rate limits; function calling guide.
 
 ---
 If a new area becomes critical, add its distilled facts here and link to an authoritative source.
+
+## OpenAI Agents SDK (integration notes)
+- Sessions: keep one SDK session per `conversation_id`. Store the session id (or state handle) and reuse for subsequent turns.
+- Event mapping: map streamed partials to `TokenEvent`; summarize tool calls to `ToolStepEvent` (name, args summary, result summary); final answer to `OutputEvent`.
+- Tools: wrap local capabilities (Terminal, Todo, MCP) as SDK function tools with explicit, validated schemas. Keep side‑effects idempotent.
+- Handoffs: model multi‑agent flows explicitly (e.g., Triage → Specialist). Use addressing and the Bus for cross‑agent chat when needed.
+- Fallback: if `OPENAI_API_KEY` is not present, use a local echo runner so Worker remains operable for E2E.
+
+Example (basic agent run – sync):
+
+```python
+from agents import Agent, Runner
+
+agent = Agent(
+    name="DevAgent",
+    instructions="Reply concisely."
+)
+
+res = Runner.run_sync(agent, "Write a haiku about recursion.")
+print(res.final_output)
+```
+
+Example (Worker mapping – conceptual):
+
+```python
+for sdk_event in runner.stream_run_sdk(envelope):
+    if sdk_event.type == "token":
+        yield TokenEvent(conversation_id=cid, text=sdk_event.text, index=idx)
+    elif sdk_event.type == "tool":
+        yield ToolStepEvent(
+            conversation_id=cid, name=sdk_event.name,
+            args=sdk_event.args, result_summary=sdk_event.result_summary,
+        )
+    elif sdk_event.type == "final":
+        yield OutputEvent(conversation_id=cid, text=sdk_event.text, usage=sdk_event.usage)
+```
+
+Checklist (SDK integration):
+- [ ] Session store keyed by `conversation_id`
+- [ ] Streamed partials surfaced promptly to SSE
+- [ ] Tool schemas strict; reject invalid input early
+- [ ] Backoff/retry for transient API errors; fail with clear error events
+- [ ] Redact secrets from logs/events
+
+## Redis Streams – do’s & don’ts
+Do
+- Use consumer groups for scalable workers; ack after successful processing
+- Keep canonical UUID in the entry fields for idempotency
+- Use tail reads without groups for simple fan‑out streams (SSE topic)
+
+Don’t
+- Don’t rely on exact once semantics; plan for at‑least‑once
+- Don’t scan entire streams for every read; keep efficient cursors
+
+Example (Redis CLI – group setup):
+
+```bash
+redis-cli XGROUP CREATE chat:DevAgent g1 0 MKSTREAM
+redis-cli XADD chat:DevAgent * id 123 payload '{"content":"hi"}'
+redis-cli XREADGROUP GROUP g1 c1 COUNT 10 STREAMS chat:DevAgent >
+```
+
+## SSE behind NGINX – minimal config
+
+```nginx
+location /stream/ {
+  proxy_pass http://gateway_upstream;
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_buffering off;
+  chunked_transfer_encoding on;
+  proxy_read_timeout 3600s;
+}
+```
+
+## pytest‑docker – responsive wait & port discovery
+
+```python
+def is_up(url: str) -> bool: ...
+
+def test_e2e(docker_services):
+    port = docker_services.port_for("gateway", 8000)
+    docker_services.wait_until_responsive(
+        timeout=60.0, pause=0.5,
+        check=lambda: is_up(f"http://localhost:{port}/health"),
+    )
+```
