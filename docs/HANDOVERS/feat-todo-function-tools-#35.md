@@ -86,8 +86,6 @@ Notes:
   - Decorate functions with `@function_tool(name="...", description="...")` (name/description optional; name defaults to function name).
   - Use precise type hints so the SDK emits a correct JSON schema for tool inputs.
 
----
-
 ## Implementation plan
 
 1) Create `magent2/tools/todo/tools.py` with:
