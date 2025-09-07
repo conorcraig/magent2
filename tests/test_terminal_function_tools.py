@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -73,4 +72,3 @@ def test_redaction_via_env_and_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "[REDACTED]" in out
     assert token not in out
     assert secret not in out
-

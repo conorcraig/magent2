@@ -108,6 +108,7 @@ except Exception:  # noqa: BLE001
     _function_tool = None  # type: ignore[assignment]
 
 if _function_tool is not None:
+
     @_function_tool  # type: ignore[misc]
     def terminal_run_tool(command: str, cwd: str | None = None) -> str:
         """Agents SDK function tool wrapper for `terminal_run`.
@@ -118,4 +119,3 @@ if _function_tool is not None:
         return terminal_run(command, cwd)
 
     __all__.append("terminal_run_tool")
-

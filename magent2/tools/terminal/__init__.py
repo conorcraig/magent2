@@ -1,5 +1,5 @@
-from .tool import TerminalTool
 from .function_tools import terminal_run
+from .tool import TerminalTool
 
 __all__ = [
     "TerminalTool",
