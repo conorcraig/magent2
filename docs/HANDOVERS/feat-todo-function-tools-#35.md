@@ -79,6 +79,25 @@ Notes:
   - For create: `{ "task": null, "error": "...", "transient": true }`.
 - Input validation errors raise `ValueError` with concise messages (Agents SDK will surface them as tool errors).
 
+Rationale:
+
+- The `transient: true` flag signals callers that the failure is likely retryable (e.g., Redis connectivity or timeouts). Callers can surface a short message to the user and optionally retry or schedule a follow-up.
+
+#### Local testing
+
+- To avoid Redis key collisions when developing locally, set a unique prefix per run:
+
+```bash
+export TODO_STORE_PREFIX="todo_dev_$(date +%s)"
+```
+
+- Typical local env for tools:
+
+```bash
+export REDIS_URL=redis://localhost:6379/0
+export TODO_STORE_PREFIX=todo_local
+```
+
 #### Function tool decorator (Agents SDK)
 
 - Import and decorate using the offline cheatsheet in `docs/refs/openai-agents-sdk.md`:

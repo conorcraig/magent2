@@ -37,6 +37,14 @@ Policy:
 - Default-deny unless allowlist is present (recommended). If both allow and block set, exposure = allow − block.
 - Only pass the explicit `env` provided; do not inherit parent environment by default.
 
+Example precedence:
+
+```text
+ALLOW=echo,secret
+BLOCK=secret
+→ exposed: echo only
+```
+
 Implementation: `magent2/tools/mcp/config.py`
 
 ```python
@@ -102,12 +110,12 @@ Update `magent2/tools/mcp/__init__.py` to export:
 
 Augment `tests/test_mcp_stdio.py` with gateway tests:
 
-1) `test_gateway_lists_and_calls_filtered_tools`
+1. `test_gateway_lists_and_calls_filtered_tools`
 
 - Temp server advertises `echo` and `secret` tools.
 - Allowlist only `echo`; assert `list_tools()` exposes only `echo` and `call('echo', {text:'hi'})` returns `hi`.
 
-2) `test_gateway_cleanup_idempotent`
+2. `test_gateway_cleanup_idempotent`
 
 - Create gateway, start, `close()`, `close()` again; no exception.
 
@@ -146,6 +154,32 @@ Filesystem variant:
 - `AGENT_DevAgent_MCP_1_CMD=npx`
 - `AGENT_DevAgent_MCP_1_ARGS=-y,@modelcontextprotocol/server-filesystem,--stdio,/path/to/dir`
 - `AGENT_DevAgent_MCP_1_ALLOW=list,read`
+
+Environment passing:
+
+- Provide a sanitized, explicit environment per server with `AGENT_<AgentName>_MCP_<N>_ENV_JSON`:
+
+```json
+{
+  "FOO": "bar",
+  "LOG_LEVEL": "warning"
+}
+```
+
+- Parent process environment is not inherited by default.
+
+### MCPServerConfig quick reference
+
+```text
+MCPServerConfig {
+  command: str
+  args: list[str]
+  cwd: str | None
+  env: dict[str, str]
+  allow: set[str] | None
+  block: set[str] | None
+}
+```
 
 ## Internal references (offline)
 
