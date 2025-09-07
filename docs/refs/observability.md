@@ -28,4 +28,5 @@ logger.info("run_started", extra={"run_id": "r1", "conversation_id": "c1"})
 ```
 
 ## References
+
 - OpenTelemetry Python; Python logging cookbook

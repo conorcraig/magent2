@@ -1,6 +1,6 @@
 # Server‑Sent Events (SSE) (Gateway streaming)
 
-- Protocol: HTTP response with `Content-Type: text/event-stream`. Events are lines prefixed with `data: `, separated by a blank line.
+- Protocol: HTTP response with `Content-Type: text/event-stream`. Events are lines prefixed with `data:`, separated by a blank line.
 - Multiple data lines per event are allowed; clients concatenate them. We emit one JSON per event line.
 - Keep‑alive: leave connection open; send periodic heartbeat comments if needed. Disable proxy buffering for real‑time delivery.
 - Client: `EventSource` in browsers auto‑reconnects; you can use Last-Event-ID to resume if you emit it.
@@ -31,4 +31,5 @@ es.onmessage = (e) => console.log(JSON.parse(e.data));
 ```
 
 ## References
+
 - MDN SSE overview; FastAPI StreamingResponse; reverse proxy buffering notes

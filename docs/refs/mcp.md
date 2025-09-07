@@ -20,4 +20,5 @@ with spawn_stdio_server(cmd) as client:
 ```
 
 ## References
+
 - modelcontextprotocol.io docs/spec; MCP GitHub org

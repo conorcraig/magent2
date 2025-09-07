@@ -17,11 +17,13 @@
 ## Do’s & don’ts
 
 Do
+
 - Use consumer groups for scalable workers; ack after successful processing.
 - Keep canonical UUID in the entry fields for idempotency.
 - Use tail reads without groups for simple fan‑out streams (SSE topic).
 
 Don’t
+
 - Rely on exactly‑once semantics; plan for at‑least‑once.
 - Scan entire streams for every read; keep efficient cursors.
 
@@ -67,5 +69,6 @@ redis-cli XREADGROUP GROUP g1 c1 COUNT 10 STREAMS chat:DevAgent >
 ```
 
 ## References
+
 - Redis Streams overview
 - XADD/XREADGROUP/XPENDING docs

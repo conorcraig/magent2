@@ -18,4 +18,5 @@ uv run ruff check && uv run mypy && uv run pytest -q
 ```
 
 ## References
+
 - Ruff docs; mypy docs; detect‑secrets; Xenon/Radon

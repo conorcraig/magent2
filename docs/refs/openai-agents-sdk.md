@@ -1,44 +1,95 @@
-# OpenAI Agents SDK – integration notes
+You must search this docs reference page to find info, it is very extensive, has many useful examples
 
-- Sessions: keep one SDK session per `conversation_id`. Store session handle and reuse for subsequent turns.
-- Event mapping: map streamed partials to `TokenEvent`; summarize tool calls to `ToolStepEvent` (name, args summary, result summary); final answer to `OutputEvent`.
-- Tools: wrap local capabilities (Terminal, Todo, MCP) as SDK function tools with explicit, validated schemas. Keep side‑effects idempotent.
-- Handoffs: model multi‑agent flows explicitly (e.g., Triage → Specialist). Use addressing + Bus for cross‑agent chat when needed.
-- Fallback: when `OPENAI_API_KEY` is absent, use a local echo runner so Worker remains operable for E2E.
+<https://openai.github.io/openai-agents-python/>
 
-## Example (basic agent run – sync)
+### Reference docs tree
 
-```python
-from agents import Agent, Runner
+Links are relative to `https://openai.github.io/openai-agents-python/`.
 
-agent = Agent(name="DevAgent", instructions="Reply concisely.")
-res = Runner.run_sync(agent, "Write a haiku about recursion.")
-print(res.final_output)
-```
-
-## Example (Worker mapping – conceptual)
-
-```python
-for sdk_event in runner.stream_run_sdk(envelope):
-    if sdk_event.type == "token":
-        yield TokenEvent(conversation_id=cid, text=sdk_event.text, index=idx)
-    elif sdk_event.type == "tool":
-        yield ToolStepEvent(
-            conversation_id=cid,
-            name=sdk_event.name,
-            args=sdk_event.args,
-            result_summary=sdk_event.result_summary,
-        )
-    elif sdk_event.type == "final":
-        yield OutputEvent(conversation_id=cid, text=sdk_event.text, usage=sdk_event.usage)
-```
-
-## Checklist
-- [ ] Session store keyed by `conversation_id`
-- [ ] Streamed partials surfaced promptly to SSE
-- [ ] Tool schemas strict; reject invalid input early
-- [ ] Backoff/retry for transient API errors; clear error events
-- [ ] Redact secrets from logs/events
-
-## References
-- OpenAI Agents SDK docs; platform rate limits; function calling guide
+├── [agent](/ref/agent/)
+├── [agent_output](/ref/agent_output/)
+├── [computer](/ref/computer/)
+├── [exceptions](/ref/exceptions/)
+├── [extensions](/ref/extensions/)
+│   ├── [handoff_filters](/ref/extensions/handoff_filters/)
+│   ├── [handoff_prompt](/ref/extensions/handoff_prompt/)
+│   ├── [litellm](/ref/extensions/litellm/)
+│   ├── [memory](/ref/extensions/memory/)
+│   │   └── [sqlalchemy_session](/ref/extensions/memory/sqlalchemy_session/)
+│   ├── [models](/ref/extensions/models/)
+│   │   ├── [litellm_model](/ref/extensions/models/litellm_model/)
+│   │   └── [litellm_provider](/ref/extensions/models/litellm_provider/)
+│   └── [visualization](/ref/extensions/visualization/)
+├── [function_schema](/ref/function_schema/)
+├── [guardrail](/ref/guardrail/)
+├── [handoffs](/ref/handoffs/)
+├── [items](/ref/items/)
+├── [lifecycle](/ref/lifecycle/)
+├── [logger](/ref/logger/)
+├── [mcp](/ref/mcp/)
+│   ├── [server](/ref/mcp/server/)
+│   └── [util](/ref/mcp/util/)
+├── [memory](/ref/memory/)
+├── [model_settings](/ref/model_settings/)
+├── [models](/ref/models/)
+│   ├── [chatcmpl_converter](/ref/models/chatcmpl_converter/)
+│   ├── [chatcmpl_helpers](/ref/models/chatcmpl_helpers/)
+│   ├── [chatcmpl_stream_handler](/ref/models/chatcmpl_stream_handler/)
+│   ├── [default_models](/ref/models/default_models/)
+│   ├── [fake_id](/ref/models/fake_id/)
+│   ├── [interface](/ref/models/interface/)
+│   ├── [multi_provider](/ref/models/multi_provider/)
+│   ├── [openai_chatcompletions](/ref/models/openai_chatcompletions/)
+│   ├── [openai_provider](/ref/models/openai_provider/)
+│   └── [openai_responses](/ref/models/openai_responses/)
+├── [prompts](/ref/prompts/)
+├── [realtime](/ref/realtime/)
+│   ├── [agent](/ref/realtime/agent/)
+│   ├── [config](/ref/realtime/config/)
+│   ├── [events](/ref/realtime/events/)
+│   ├── [handoffs](/ref/realtime/handoffs/)
+│   ├── [items](/ref/realtime/items/)
+│   ├── [model](/ref/realtime/model/)
+│   ├── [model_events](/ref/realtime/model_events/)
+│   ├── [model_inputs](/ref/realtime/model_inputs/)
+│   ├── [openai_realtime](/ref/realtime/openai_realtime/)
+│   ├── [runner](/ref/realtime/runner/)
+│   └── [session](/ref/realtime/session/)
+├── [repl](/ref/repl/)
+├── [result](/ref/result/)
+├── [run](/ref/run/)
+├── [run_context](/ref/run_context/)
+├── [stream_events](/ref/stream_events/)
+├── [strict_schema](/ref/strict_schema/)
+├── [tool](/ref/tool/)
+├── [tool_context](/ref/tool_context/)
+├── [tracing](/ref/tracing/)
+│   ├── [create](/ref/tracing/create/)
+│   ├── [logger](/ref/tracing/logger/)
+│   ├── [processor_interface](/ref/tracing/processor_interface/)
+│   ├── [processors](/ref/tracing/processors/)
+│   ├── [provider](/ref/tracing/provider/)
+│   ├── [scope](/ref/tracing/scope/)
+│   ├── [setup](/ref/tracing/setup/)
+│   ├── [span_data](/ref/tracing/span_data/)
+│   ├── [spans](/ref/tracing/spans/)
+│   ├── [traces](/ref/tracing/traces/)
+│   └── [util](/ref/tracing/util/)
+├── [usage](/ref/usage/)
+├── [version](/ref/version/)
+└── [voice](/ref/voice/)
+    ├── [events](/ref/voice/events/)
+    ├── [exceptions](/ref/voice/exceptions/)
+    ├── [imports](/ref/voice/imports/)
+    ├── [input](/ref/voice/input/)
+    ├── [model](/ref/voice/model/)
+    ├── [models](/ref/voice/models/)
+    │   ├── [openai_model_provider](/ref/voice/models/openai_model_provider/)
+    │   ├── [openai_provider](/ref/voice/models/openai_provider/)
+    │   ├── [openai_stt](/ref/voice/models/openai_stt/)
+    │   └── [openai_tts](/ref/voice/models/openai_tts/)
+    ├── [pipeline](/ref/voice/pipeline/)
+    ├── [pipeline_config](/ref/voice/pipeline_config/)
+    ├── [result](/ref/voice/result/)
+    ├── [utils](/ref/voice/utils/)
+    └── [workflow](/ref/voice/workflow/)

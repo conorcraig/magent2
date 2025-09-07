@@ -18,4 +18,5 @@ def test_stack(docker_services):
 ```
 
 ## References
+
 - pytest‑docker docs; Compose healthcheck docs
