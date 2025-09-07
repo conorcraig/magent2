@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import redis
 
@@ -49,7 +50,7 @@ class RedisTodoStore(TodoStore):
     """
 
     def __init__(self, *, url: str, key_prefix: str = "todo") -> None:
-        self._redis = redis.Redis.from_url(url)
+        self._redis: redis.Redis = redis.Redis.from_url(url)
         self._prefix = key_prefix.rstrip(":")
 
     # key helpers
@@ -72,20 +73,20 @@ class RedisTodoStore(TodoStore):
         return task
 
     def get_task(self, task_id: str) -> Task | None:
-        raw = self._redis.hget(self._task_key(task_id), "json")
-        if not raw:
+        raw = cast(bytes | None, self._redis.hget(self._task_key(task_id), "json"))
+        if raw is None:
             return None
         try:
-            data = json.loads(raw)
+            data = json.loads(raw.decode("utf-8"))
             return Task.model_validate(data)
         except Exception:
             return None
 
     def list_tasks(self, conversation_id: str) -> list[Task]:
-        ids = self._redis.zrange(self._conv_key(conversation_id), 0, -1)
-        if not ids:
+        ids_bytes = cast(list[bytes], self._redis.zrange(self._conv_key(conversation_id), 0, -1))
+        if not ids_bytes:
             return []
-        task_ids = [i.decode("utf-8") if isinstance(i, bytes) else i for i in ids]
+        task_ids = [b.decode("utf-8") for b in ids_bytes]
         result: list[Task] = []
         for tid in task_ids:
             t = self.get_task(tid)
