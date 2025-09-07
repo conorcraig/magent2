@@ -18,7 +18,7 @@ def _read_instructions() -> str:
     path = os.getenv("AGENT_INSTRUCTIONS_FILE")
     if path:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
         except Exception:
             # Fallback to env if file missing/unreadable
@@ -47,4 +47,3 @@ def load_config(env: dict[str, str] | None = None) -> RunnerConfig:
 
 
 __all__ = ["RunnerConfig", "load_config"]
-

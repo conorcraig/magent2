@@ -38,13 +38,19 @@ class OpenAIAgentsRunner:
     # Public API (Runner protocol)
     # ----------------------------
     def stream_run(self, envelope: MessageEnvelope) -> Iterable[BaseStreamEvent | dict[str, Any]]:
-        events_queue: Queue[BaseStreamEvent | dict[str, Any] | None] = Queue()
+        # Bound the queue to guard against unbounded growth if a consumer is slow
+        events_queue: Queue[BaseStreamEvent | dict[str, Any] | None] = Queue(maxsize=1024)
         sentinel: None = None
 
         def _runner() -> None:
-            asyncio.run(self._run_streaming(envelope, events_queue))
-            # Signal completion
-            events_queue.put(sentinel)
+            try:
+                asyncio.run(self._run_streaming(envelope, events_queue))
+            except Exception:
+                # Silently swallow to avoid breaking the worker; sentinel still sent
+                pass
+            finally:
+                # Signal completion regardless of errors
+                events_queue.put(sentinel)
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -126,9 +132,7 @@ class OpenAIAgentsRunner:
                 )
             )
 
-    def _map_event(
-        self, conversation_id: str, ev: Any, token_index: int
-    ) -> BaseStreamEvent | None:
+    def _map_event(self, conversation_id: str, ev: Any, token_index: int) -> BaseStreamEvent | None:
         """Map SDK stream event to our v1 stream events.
 
         Tolerant to either typed objects or dict-shaped events.
@@ -142,12 +146,16 @@ class OpenAIAgentsRunner:
             if isinstance(data, ResponseTextDeltaEvent):
                 delta = getattr(data, "delta", None)
                 if isinstance(delta, str) and delta:
-                    return TokenEvent(conversation_id=conversation_id, text=delta, index=token_index)
+                    return TokenEvent(
+                        conversation_id=conversation_id, text=delta, index=token_index
+                    )
                 return None
             if isinstance(data, dict):
                 delta_val = data.get("delta")
                 if isinstance(delta_val, str) and delta_val:
-                    return TokenEvent(conversation_id=conversation_id, text=delta_val, index=token_index)
+                    return TokenEvent(
+                        conversation_id=conversation_id, text=delta_val, index=token_index
+                    )
             return None
 
         # 2) run item events: tools, messages, etc.
@@ -169,7 +177,7 @@ class OpenAIAgentsRunner:
                     result = item.get("result") or item.get("output") or item.get("content")
 
                 # If we have a tool invocation (name + args)
-                if isinstance(name, str) and name and isinstance(args, (dict, list)):
+                if isinstance(name, str) and name and isinstance(args, dict | list):
                     # Normalize args to dict where possible
                     norm_args: dict[str, Any]
                     if isinstance(args, dict):
@@ -189,6 +197,33 @@ class OpenAIAgentsRunner:
                         result_summary=summary,
                     )
 
+                # Detect explicit final assistant output
+                is_final = False
+                # Attribute flags
+                for flag_attr in ("final", "is_final", "completed"):
+                    if getattr(item, flag_attr, False):
+                        is_final = True
+                        break
+                # Dict flags
+                if isinstance(item, dict):
+                    if any(
+                        item.get(k) in (True, "completed", "done", "final")
+                        for k in ("final", "is_final", "completed", "status")
+                    ):
+                        is_final = True
+                    kind = item.get("kind") or item.get("type") or ""
+                    if isinstance(kind, str) and "completed" in kind:
+                        is_final = True
+
+                text_value = self._extract_text(item)
+                if is_final and isinstance(text_value, str) and text_value:
+                    usage = self._extract_usage(item)
+                    return OutputEvent(
+                        conversation_id=conversation_id,
+                        text=text_value,
+                        usage=usage,
+                    )
+
             return None
 
         # Ignore other event kinds for now
@@ -199,6 +234,43 @@ class OpenAIAgentsRunner:
         text = str(value)
         return text if len(text) <= limit else text[: limit - 1] + "\u2026"
 
+    @staticmethod
+    def _extract_text(item: Any) -> str | None:
+        # Attribute possibilities
+        for attr in ("text", "content", "message", "output"):
+            val = getattr(item, attr, None)
+            if isinstance(val, str) and val:
+                return val
+        # Dict possibilities
+        if isinstance(item, dict):
+            for key in ("text", "content", "message", "output"):
+                val = item.get(key)
+                if isinstance(val, str) and val:
+                    return val
+                if isinstance(val, list):
+                    # Concatenate string-like pieces
+                    parts: list[str] = []
+                    for p in val:
+                        if isinstance(p, str):
+                            parts.append(p)
+                        elif isinstance(p, dict):
+                            t = p.get("text") or p.get("content") or p.get("output")
+                            if isinstance(t, str):
+                                parts.append(t)
+                    if parts:
+                        return "".join(parts)
+        return None
+
+    @staticmethod
+    def _extract_usage(item: Any) -> dict[str, Any] | None:
+        usage = getattr(item, "usage", None)
+        if isinstance(usage, dict):
+            return usage
+        if isinstance(item, dict):
+            u = item.get("usage")
+            if isinstance(u, dict):
+                return u
+        return None
+
 
 __all__ = ["OpenAIAgentsRunner"]
-

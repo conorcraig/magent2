@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import types
-from typing import Any, Iterable
+from typing import Any
 
 import pytest
 
@@ -57,6 +57,7 @@ def test_adapter_maps_token_tool_and_output(monkeypatch: pytest.MonkeyPatch) -> 
 
     # Build runner
     from agents import Agent
+
     from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
 
     agent = Agent(name="DevAgent", instructions="You are a helpful assistant.")
@@ -83,8 +84,16 @@ def test_adapter_maps_token_tool_and_output(monkeypatch: pytest.MonkeyPatch) -> 
     ]
     assert isinstance(out[0], TokenEvent) and out[0].text == "H" and out[0].index == 0
     assert isinstance(out[1], TokenEvent) and out[1].text == "i" and out[1].index == 1
-    assert isinstance(out[2], ToolStepEvent) and out[2].name == "terminal.run" and out[2].args == {"cmd": "echo hi"}
-    assert isinstance(out[3], ToolStepEvent) and out[3].name == "terminal.run" and out[3].result_summary == "ok"
+    assert (
+        isinstance(out[2], ToolStepEvent)
+        and out[2].name == "terminal.run"
+        and out[2].args == {"cmd": "echo hi"}
+    )
+    assert (
+        isinstance(out[3], ToolStepEvent)
+        and out[3].name == "terminal.run"
+        and out[3].result_summary == "ok"
+    )
     assert isinstance(out[4], OutputEvent) and out[4].text == "Hi"
 
 
@@ -103,6 +112,7 @@ def test_adapter_reuses_session_by_conversation(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(oar, "SDKRunner", _SpySDKRunner)
 
     from agents import Agent
+
     from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
 
     agent = Agent(name="DevAgent", instructions="You are a helpful assistant.")
@@ -126,3 +136,39 @@ def test_adapter_reuses_session_by_conversation(monkeypatch: pytest.MonkeyPatch)
     assert getattr(runner, "_sessions") is not None
     assert len(getattr(runner, "_sessions")) == 1
 
+
+def test_adapter_prefers_explicit_final_output_and_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange SDK-like events with explicit final output
+    final = {
+        "type": "assistant_message",
+        "final": True,
+        "text": "Final answer",
+        "usage": {"input_tokens": 5, "output_tokens": 2},
+    }
+
+    sdk_events = [
+        _make_event("raw_response_event", {"delta": "F"}),
+        _make_event("run_item_stream_event", final),
+    ]
+    _patch_sdk_runner(monkeypatch, sdk_events)
+
+    from agents import Agent
+
+    from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
+
+    agent = Agent(name="DevAgent", instructions="You are a helpful assistant.")
+    runner = OpenAIAgentsRunner(agent)
+
+    env = MessageEnvelope(
+        conversation_id="conv_final",
+        sender="user:test",
+        recipient="agent:DevAgent",
+        type="message",
+        content="hello",
+    )
+
+    out = list(runner.stream_run(env))
+    # Should include token and explicit output (not synthesized from tokens)
+    assert [e.event for e in out] == ["token", "output"]
+    assert out[-1].text == "Final answer"
+    assert out[-1].usage == {"input_tokens": 5, "output_tokens": 2}

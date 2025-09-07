@@ -4,12 +4,13 @@ import os
 from collections.abc import Iterable
 from typing import Any
 
+from agents import Agent
+
 from magent2.bus.redis_adapter import RedisBus
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, TokenEvent
-from magent2.worker.worker import Runner, Worker
 from magent2.runner.config import load_config
 from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
-from agents import Agent
+from magent2.worker.worker import Runner, Worker
 
 
 class EchoRunner(Runner):
