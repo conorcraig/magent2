@@ -7,6 +7,9 @@ from typing import Any
 from magent2.bus.redis_adapter import RedisBus
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, TokenEvent
 from magent2.worker.worker import Runner, Worker
+from magent2.runner.config import load_config
+from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
+from agents import Agent
 
 
 class EchoRunner(Runner):
@@ -15,11 +18,19 @@ class EchoRunner(Runner):
         yield OutputEvent(conversation_id=envelope.conversation_id, text=f"{envelope.content}")
 
 
+def build_runner_from_env() -> Runner:
+    cfg = load_config()
+    if cfg.api_key:
+        agent = Agent(name=cfg.agent_name, instructions=cfg.instructions)
+        return OpenAIAgentsRunner(agent)
+    return EchoRunner()
+
+
 def main() -> None:
-    agent_name = os.getenv("AGENT_NAME", "DevAgent")
+    cfg = load_config()
     bus = RedisBus(redis_url=os.getenv("REDIS_URL"))
-    runner = EchoRunner()
-    worker = Worker(agent_name=agent_name, bus=bus, runner=runner)
+    runner: Runner = build_runner_from_env()
+    worker = Worker(agent_name=cfg.agent_name, bus=bus, runner=runner)
     # Simple loop: poll until interrupted
     try:
         while True:
