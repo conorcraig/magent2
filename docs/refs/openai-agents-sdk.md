@@ -216,3 +216,53 @@ def create_task(conversation_id: str, title: str, metadata: dict[str, Any] | Non
 - Event shapes may evolve; prefer feature checks over strict type equality.
 - Some SDK objects are dict-like and typed; try attribute access first, then `get`.
 - If no explicit final output API is exposed by your version, accumulate token deltas and emit that as final output.
+
+### Tool context (RunContextWrapper) — dependency injection
+
+Some SDK versions expose a run/tool context wrapper to pass shared state (e.g., DB handles, user/session info) to tools.
+
+```python
+from __future__ import annotations
+from typing import Any
+from agents import function_tool, RunContextWrapper  # verify availability in your version
+
+class MyContext:
+    def __init__(self) -> None:
+        self.request_id = "req-123"
+        self.user = {"name": "alice"}
+
+@function_tool
+def get_request_info(ctx: RunContextWrapper[Any]) -> dict[str, Any]:
+    """Return request/user info from the run context."""
+    # Access the underlying context object
+    c = getattr(ctx, "context", None)
+    return {
+        "request_id": getattr(c, "request_id", None),
+        "user": getattr(c, "user", None),
+    }
+```
+
+Notes:
+- If `RunContextWrapper` is not present in your installed SDK version, omit the context parameter and read from environment/config instead.
+- For magent2 chat tools, prefer passing `conversation_id` via context when available.
+
+### Tool error handling via decorator
+
+The decorator can transform exceptions into a tool return using a failure handler, keeping the run alive and returning a compact error string:
+
+```python
+from agents import function_tool
+
+def _tool_error(e: Exception) -> str:
+    # Keep short to fit model context; avoid leaking internal details
+    return f"error: {type(e).__name__}: {e}"[:200]
+
+@function_tool(failure_error_function=_tool_error)
+def safe_echo(text: str) -> str:
+    if not text.strip():
+        raise ValueError("text must be non-empty")
+    return text
+```
+
+Tip:
+- Prefer raising `ValueError` for input validation issues so the SDK surfaces a clear tool error.
