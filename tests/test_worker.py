@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import (
     MessageEnvelope,
@@ -158,3 +160,22 @@ def test_worker_one_run_per_conversation() -> None:
         "token",
         "output",
     ]
+
+
+def test_runner_selection_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Import helper after patching env each time
+    import importlib
+
+    m = importlib.import_module("magent2.worker.__main__")
+
+    # Case 1: no API key -> EchoRunner
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    importlib.reload(m)
+    r1 = m.build_runner_from_env()
+    assert r1.__class__.__name__ == "EchoRunner"
+
+    # Case 2: api key set -> OpenAIAgentsRunner
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    importlib.reload(m)
+    r2 = m.build_runner_from_env()
+    assert r2.__class__.__name__ == "OpenAIAgentsRunner"
