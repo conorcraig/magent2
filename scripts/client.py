@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -36,6 +37,8 @@ class StreamPrinter:
         # One-shot coordination: set when a final OutputEvent is observed
         self._final_event = threading.Event()
         self._final_text: str | None = None
+        # Optional cutoff: ignore events older than this timestamp (ISO 8601 in data)
+        self._since_iso: str | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -93,10 +96,24 @@ class StreamPrinter:
 
     def _handle_event(self, data: dict[str, Any]) -> None:
         event_type = str(data.get("event", "")).lower()
+        # Filter out stale events when a cutoff is set
+        if self._since_iso:
+            ev_created = str(data.get("created_at", ""))
+            try:
+                if ev_created and ev_created < self._since_iso:
+                    return
+            except Exception:
+                pass
         if event_type == "token":
             text = str(data.get("text", ""))
             # Print tokens inline
             self._print_inline(text)
+            return
+        if event_type == "user_message":
+            sender = str(data.get("sender", "user"))
+            text = str(data.get("text", ""))
+            self._println("")
+            self._println(f"{sender}> {text}")
             return
         if event_type == "tool_step":
             name = data.get("name", "tool")
@@ -247,6 +264,9 @@ def one_shot(cfg: ClientConfig, message: str, timeout: float) -> int:
     Returns exit code: 0 on success, non-zero on timeout or send error.
     """
     stream = StreamPrinter(cfg)
+    # Set a cutoff so we ignore stale events; we choose now-100ms to account for clock skew
+    cutoff = datetime.now(UTC).timestamp() - 0.1
+    stream._since_iso = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
     stream.start()
     try:
         _send_message(cfg, message)

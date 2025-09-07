@@ -78,9 +78,9 @@ class OpenAIAgentsRunner:
             self._session_order.append(conversation_id)
             return self._sessions[conversation_id]
 
-        # Create a new opaque session object; if SDK exposes a concrete Session,
-        # callers/tests can still verify reuse by identity.
-        session: Any = object()
+        # For now, defer session management to the SDK by passing None.
+        # When we adopt the SDK's concrete Session type, initialize it here.
+        session: Any = None
         self._sessions[conversation_id] = session
         self._session_order.append(conversation_id)
         if len(self._sessions) > self._session_limit:

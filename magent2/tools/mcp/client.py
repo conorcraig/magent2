@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
+import sys as _sys
 import threading
 import time
 from collections.abc import Iterator
@@ -65,7 +67,7 @@ def _write_frame(stdin: IO[bytes], payload: dict[str, Any]) -> None:
     stdin.flush()
 
 
-@dataclass(slots=True)
+@dataclass
 class _Pending:
     created_ms: int
     response_queue: queue.Queue[dict[str, Any]]
@@ -218,6 +220,23 @@ def spawn_stdio_server(
         env=env,
         bufsize=0,
     )
+    # Optional debug: mirror child stderr to our stderr when enabled
+    if os.getenv("MCP_DEBUG_STDERR") in {"1", "true", "True"} and proc.stderr is not None:
+        # Narrow type for mypy by capturing into a local variable
+        stderr = proc.stderr
+
+        def _drain_stderr() -> None:
+            try:
+                for line in iter(stderr.readline, b""):
+                    try:
+                        _sys.stderr.write(line.decode(errors="replace"))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_drain_stderr, name="mcp-stderr", daemon=True)
+        t.start()
     client = MCPClient(proc)
     try:
         # Caller is responsible for sending initialize(), to allow flexible handshakes

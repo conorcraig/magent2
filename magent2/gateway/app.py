@@ -1,32 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
-import time
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from magent2.bus.interface import Bus, BusMessage
-from magent2.observability import get_json_logger
-
-log = get_json_logger("gateway")
 
 
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
-
-    @app.middleware("http")
-    async def access_log_filter(request: Request, call_next: Any) -> Response:
-        # Skip logging for health endpoint; log basic info for others
-        start = time.perf_counter()
-        response: Response = await call_next(request)
-        if request.url.path != "/health":
-            dur_ms = int((time.perf_counter() - start) * 1000)
-            # Minimal, readable line; keep simple to avoid noise
-            print(f"REQ {request.method} {request.url.path} -> {response.status_code} {dur_ms}ms")
-        return response
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
@@ -52,20 +38,21 @@ def create_app(bus: Bus) -> FastAPI:
                 agent_topic = f"chat:{agent_name}"
                 bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=message))
 
-        # Minimal structured log for visibility (without leaking full payload)
-        content_val = str(message.get("content", ""))
-        log.info(
-            "inbound_message",
-            extra={
-                "event": "inbound_message",
-                "metadata": {
-                    "conversation_id": message.get("conversation_id"),
-                    "recipient": recipient,
-                    "len": len(content_val),
-                    "snippet": content_val[:120],
-                },
-            },
-        )
+        # Emit a user_message event to the stream so all subscribers see the inbound message
+        try:
+            stream_topic = f"stream:{message['conversation_id']}"
+            created_at = datetime.datetime.now(datetime.UTC).isoformat()
+            user_evt = {
+                "event": "user_message",
+                "conversation_id": message["conversation_id"],
+                "sender": message.get("sender", "user"),
+                "text": message.get("content", ""),
+                "created_at": created_at,
+            }
+            bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=user_evt))
+        except Exception:
+            # Do not fail the request if stream fan-out fails; inbound chat publish already happened
+            pass
 
         return {"status": "ok", "topic": conv_topic}
 

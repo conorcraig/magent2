@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,8 +33,37 @@ class MCPToolGateway:
             return
         for cfg in self._configs:
             cmd = [cfg.command, *cfg.args]
-            # Do NOT inherit parent env: provide a minimal safe default if not set
-            env = cfg.env if cfg.env else {"PATH": "/usr/bin:/bin:/usr/local/bin", "LC_ALL": "C"}
+
+            # Sanitize-and-inherit: start from current env, drop sensitive keys,
+            # enforce safe defaults, then apply explicit overrides from config.
+            def _is_sensitive_env_key(name: str) -> bool:
+                upper = name.upper()
+                if "SENTINEL" in upper:
+                    return True
+                if any(p in upper for p in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+                    return True
+                if upper.startswith(
+                    (
+                        "AWS_",
+                        "AZURE_",
+                        "GCP_",
+                        "GOOGLE_",
+                        "OPENAI_",
+                        "ANTHROPIC_",
+                        "HUGGINGFACE_",
+                        "HF_",
+                    )
+                ):
+                    return True
+                return False
+
+            env = {k: v for k, v in os.environ.items() if not _is_sensitive_env_key(k)}
+            env.setdefault("PATH", "/usr/bin:/bin:/usr/local/bin")
+            env.setdefault("LC_ALL", "C")
+            env.setdefault("PYTHONIOENCODING", "utf-8")
+            env.setdefault("PYTHONUNBUFFERED", "1")
+            if cfg.env:
+                env.update(cfg.env)
             ctx = spawn_stdio_server(cmd, cwd=cfg.cwd, env=env)
             # Enter the context to get a live client; store the client and its exit stack
             client = ctx.__enter__()

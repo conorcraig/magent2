@@ -45,6 +45,7 @@ timeout_method = "thread"
 python_files = ["test_*.py"]
 markers = [
     "docker: marks tests that require Docker",
+    "deep: marks deep env/integration tests",
 ]
 
 [dependency-groups]

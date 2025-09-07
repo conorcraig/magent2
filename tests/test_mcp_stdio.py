@@ -143,9 +143,9 @@ def read_frame(inp: io.BufferedReader) -> dict:
 
 def write_frame(out: io.BufferedWriter, payload: dict) -> None:
     data = json.dumps(payload).encode()
-    header = 'Content-Length: ' + str(len(data)) + '\r\n'
+    header = 'Content-Length: ' + str(len(data)) + '\\r\\n'
     out.write(header.encode())
-    out.write(b'\r\n')
+    out.write(b'\\r\\n')
     out.write(data)
     out.flush()
 
@@ -304,9 +304,9 @@ def read_frame(inp: io.BufferedReader) -> dict:
 
 def write_frame(out: io.BufferedWriter, payload: dict) -> None:
     data = json.dumps(payload).encode()
-    header = 'Content-Length: ' + str(len(data)) + '\r\n'
+    header = 'Content-Length: ' + str(len(data)) + '\\r\\n'
     out.write(header.encode())
-    out.write(b'\r\n')
+    out.write(b'\\r\\n')
     out.write(data)
     out.flush()
 
@@ -370,11 +370,10 @@ if __name__ == '__main__':
     return script
 
 
+@pytest.mark.deep
 def test_gateway_does_not_inherit_parent_env_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if os.getenv("RUN_DEEP_ENV_TESTS") != "1":
-        pytest.skip("Deep env inheritance test disabled by default")
     os.environ["SENTINEL_DO_NOT_LEAK"] = "SHOULD_NOT_BE_VISIBLE"
     server_script = _write_env_echo_server(tmp_path)
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_CMD", sys.executable)
@@ -471,11 +470,10 @@ if __name__ == '__main__':
     return script
 
 
+@pytest.mark.deep
 def test_gateway_initialize_uses_bounded_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if os.getenv("RUN_DEEP_ENV_TESTS") != "1":
-        pytest.skip("Slow init timeout test disabled by default")
     server_script = _write_slow_init_server(tmp_path)
     monkeypatch.setenv("AGENT_Slow_MCP_0_CMD", sys.executable)
     monkeypatch.setenv("AGENT_Slow_MCP_0_ARGS", f"-u,{server_script}")
