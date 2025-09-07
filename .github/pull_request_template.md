@@ -1,11 +1,13 @@
+# Pull Request
+
 ## Summary
 
 Explain the change and the user impact.
 
 ## Linked Issues
 
-- Closes #<issue>
-- Related: #<issue>
+- Closes #123
+- Related: #123
 
 ## Changes
 

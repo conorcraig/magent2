@@ -1,18 +1,23 @@
 # Contributing to magent2
 
-This repo is designed for parallel development by multiple agents. Please follow these rules to avoid conflicts.
+This repo is designed for parallel development by multiple agents.
+Please follow these rules to avoid conflicts.
 
 ## Branches and issues
 
-- Create feature branches per issue: `feat/<slug>-#<issue>` (e.g. `feat/bus-envelope-#3`).
-- Reference the issue number in every commit message: `chore: #3 add Bus interface`.
-- One logical component per branch (e.g., `magent2/tools/terminal/`). Do not edit unrelated areas.
+- Create feature branches per issue: `feat/<slug>-#<issue>` (e.g.
+  `feat/bus-envelope-#3`).
+- Reference the issue number in every commit message: `chore: #3 add Bus
+  interface`.
+- One logical component per branch (e.g., `magent2/tools/terminal/`). Do not
+  edit unrelated areas.
 
 ## Contracts (frozen)
 
 - Message envelope and stream events v1: see `docs/CONTRACTS.md`.
 - Bus API v1: see `docs/CONTRACTS.md`.
-- If you need changes, open a new issue proposing `v1.1` with exact field/API diffs.
+- If you need changes, open a new issue proposing `v1.1` with exact
+  field/API diffs.
 
 ## Tests (TDD)
 
@@ -29,7 +34,8 @@ This repo is designed for parallel development by multiple agents. Please follow
 ## Directory ownership
 
 - `magent2/models/` – shared schemas (do not break v1).
-- `magent2/bus/` – bus interface/adapters (no changes to interface without approval).
+- `magent2/bus/` – bus interface/adapters (no changes to interface without
+  approval).
 - `magent2/worker/` – subscriber loop and runner wiring.
 - `magent2/tools/*` – independent tools. Avoid cross-tool imports.
 - `magent2/gateway/` – optional HTTP+SSE.

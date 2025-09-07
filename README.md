@@ -1,12 +1,16 @@
 # magent2
 
-Agent runtime using the OpenAI Agents SDK with a swappable message bus (Redis first), streamed events, and modular tools. Small core, clean seams, easy to extend.
+Agent runtime using the OpenAI Agents SDK with a swappable message bus (Redis
+first), streamed events, and modular tools. Small core, clean seams, easy to
+extend.
 
 ## What it is
 
-- Worker subscribes to a Bus, runs an Agents SDK Agent (streamed), and publishes token/tool-step/output events.
+- Worker subscribes to a Bus, runs an Agents SDK Agent (streamed), and
+  publishes token/tool-step/output events.
 - Tools are first-class (terminal, todo, MCP, chat-to-agent) with guardrails.
-- Redis Streams is the initial bus; the Bus API is abstract to allow future transports.
+- Redis Streams is the initial bus; the Bus API is abstract to allow future
+  transports.
 - Optional Gateway exposes HTTP POST for input and SSE for streaming output.
 
 ## Architecture
@@ -81,7 +85,8 @@ See `docs/CONTRACTS.md`.
 
 ## Parallel workflow
 
-- Follow `docs/PARALLEL_WORK.md` for branch naming, ownership, and TDD expectations.
+- Follow `docs/PARALLEL_WORK.md` for branch naming, ownership, and TDD
+  expectations.
 - Always reference an issue number in commit messages and PRs.
 
 ## Status
