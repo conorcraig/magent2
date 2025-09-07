@@ -5,10 +5,10 @@ services:
       - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 1s
+      interval: 10s
       timeout: 1s
-      retries: 10
-      start_period: 1s
+      retries: 3
+      start_period: 5s
 
   gateway:
     build: .
@@ -25,10 +25,10 @@ services:
     stop_grace_period: 1s
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import http.client as h; c=h.HTTPConnection(\"localhost\",8000,timeout=1); c.request(\"GET\",\"/health\"); r=c.getresponse(); exit(0 if r.status<500 else 1)' "]
-      interval: 1s
+      interval: 10s
       timeout: 1s
-      retries: 10
-      start_period: 3s
+      retries: 3
+      start_period: 5s
 
   worker:
     build: .
@@ -46,7 +46,7 @@ services:
     stop_grace_period: 1s
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.settimeout(1); s.connect((\"redis\",6379)); s.close()' "]
-      interval: 1s
+      interval: 10s
       timeout: 1s
-      retries: 10
-      start_period: 2s
+      retries: 3
+      start_period: 5s

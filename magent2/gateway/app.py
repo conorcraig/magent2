@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from magent2.bus.interface import Bus, BusMessage
@@ -12,6 +13,17 @@ from magent2.bus.interface import Bus, BusMessage
 
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
+
+    @app.middleware("http")
+    async def access_log_filter(request: Request, call_next: Any) -> Response:
+        # Skip logging for health endpoint; log basic info for others
+        start = time.perf_counter()
+        response: Response = await call_next(request)
+        if request.url.path != "/health":
+            dur_ms = int((time.perf_counter() - start) * 1000)
+            # Minimal, readable line; keep simple to avoid noise
+            print(f"REQ {request.method} {request.url.path} -> {response.status_code} {dur_ms}ms")
+        return response
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
