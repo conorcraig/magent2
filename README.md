@@ -147,7 +147,7 @@ See `docs/CONTRACTS.md`.
 
 - Follow `docs/PARALLEL_WORK.md` for branch naming, ownership, and TDD
   expectations.
-- Always reference an issue number in commit messages.
+- Always reference an issue number in commit messages and PRs.
 
 ## Status
 
