@@ -22,6 +22,7 @@ class MCPToolGateway:
         # Map tool name -> owning client index
         self._tool_owner: dict[str, int] = {}
         self._clients: list[MCPClient] = []
+        self._contexts: list[object] = []
         self._client_started: bool = False
 
     # Lifecycle
@@ -30,7 +31,9 @@ class MCPToolGateway:
             return
         for cfg in self._configs:
             cmd = [cfg.command, *cfg.args]
-            ctx = spawn_stdio_server(cmd, cwd=cfg.cwd, env=cfg.env)
+            # Treat empty env as None to inherit parent env for process viability
+            env = cfg.env or None
+            ctx = spawn_stdio_server(cmd, cwd=cfg.cwd, env=env)
             # Enter the context to get a live client; store the client and its exit stack
             client = ctx.__enter__()
             try:
@@ -42,34 +45,40 @@ class MCPToolGateway:
                 finally:
                     raise
             self._clients.append(client)
+            # Retain the context manager to prevent premature finalization
+            self._contexts.append(ctx)
         # Build tool index now so list/call are efficient
         self._index_tools()
         self._client_started = True
 
     def _index_tools(self) -> None:
         self._tool_owner.clear()
-        for idx, (cfg, client) in enumerate(zip(self._configs, self._clients)):
-            try:
-                tools = client.list_tools()
-            except Exception:
-                # Skip misbehaving server; do not index any tools from it
-                continue
-            allow = cfg.allow
-            block = cfg.block or set()
-            for tool in tools:
-                name = tool.get("name")
-                if not isinstance(name, str) or not name:
-                    continue
-                # Policy: default-deny unless allowlist present.
-                # If allowlist exists, expose only allow - block.
-                if allow is None:
-                    # No allowlist provided → expose nothing from this server
-                    continue
-                if name not in allow or name in block:
-                    continue
-                # First seen wins on conflicts
-                if name not in self._tool_owner:
-                    self._tool_owner[name] = idx
+        for index, (config, client) in enumerate(zip(self._configs, self._clients)):
+            for name in self._iter_server_tool_names(client):
+                if self._is_exposed_by_policy(config, name) and name not in self._tool_owner:
+                    self._tool_owner[name] = index
+
+    def _iter_server_tool_names(self, client: MCPClient) -> list[str]:
+        try:
+            tools = client.list_tools()
+        except Exception:
+            return []
+        names: list[str] = []
+        for tool in tools:
+            name = tool.get("name")
+            if isinstance(name, str) and name:
+                names.append(name)
+        return names
+
+    def _is_exposed_by_policy(self, config: MCPServerConfig, name: str) -> bool:
+        # Default-deny unless allowlist present; expose allow - block.
+        if config.allow is None:
+            return False
+        if name not in config.allow:
+            return False
+        if config.block and name in config.block:
+            return False
+        return True
 
     def list_tools(self) -> list[ToolInfo]:
         result: list[ToolInfo] = []
@@ -96,7 +105,9 @@ class MCPToolGateway:
                 break
         return result
 
-    def call(self, name: str, arguments: dict[str, Any] | None = None, timeout: float | None = None) -> dict[str, Any]:
+    def call(
+        self, name: str, arguments: dict[str, Any] | None = None, timeout: float | None = None
+    ) -> dict[str, Any]:
         if name not in self._tool_owner:
             raise KeyError(f"Unknown tool: {name}")
         idx = self._tool_owner[name]
@@ -107,15 +118,17 @@ class MCPToolGateway:
 
     def close(self) -> None:
         # Idempotent close
-        for client in self._clients:
+        # Close via stored context managers to ensure cleanup in correct order
+        for ctx in reversed(self._contexts):
             try:
-                client.close()
+                # mypy: dynamic protocol (__exit__ exists on context managers)
+                ctx.__exit__(None, None, None)  # type: ignore[attr-defined]
             except Exception:
                 pass
         self._clients.clear()
+        self._contexts.clear()
         self._tool_owner.clear()
         self._client_started = False
 
 
 __all__ = ["ToolInfo", "MCPToolGateway"]
-

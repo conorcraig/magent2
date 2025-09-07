@@ -18,4 +18,3 @@ def load_for_agent(agent_name: str) -> MCPToolGateway | None:
 
 
 __all__ = ["MCPServerConfig", "load_agent_mcp_configs", "MCPToolGateway", "load_for_agent"]
-

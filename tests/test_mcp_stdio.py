@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-import os
+import pytest
 
 
 def _write_echo_server_script(tmp_path: Path) -> Path:
@@ -116,30 +116,9 @@ if __name__ == '__main__':
         encoding="utf-8",
     )
     return script
-
-
-def test_mcp_stdio_echo(tmp_path: Path) -> None:
-    from magent2.tools.mcp.client import MCPClient, spawn_stdio_server
-
-    server_script = _write_echo_server_script(tmp_path)
-    cmd = [sys.executable, "-u", str(server_script)]
-
-    client: MCPClient
-    with spawn_stdio_server(cmd) as client:
-        init = client.initialize()
-        assert init["protocolVersion"] == "1.0"
-
-        tools = client.list_tools()
-        names = [t["name"] for t in tools]
-        assert "echo" in names
-
-        result = client.call_tool("echo", {"text": "hello"})
-        assert result["content"] == "hello"
-
-
-def _write_multi_tool_server_script(tmp_path: Path) -> Path:
-    """Server that exposes echo and secret tools for gateway filtering tests."""
-    script = tmp_path / "multi_tool_mcp_server.py"
+def _write_secret_server_script(tmp_path: Path) -> Path:
+    """Create an MCP server with one tool: secret(code)."""
+    script = tmp_path / "secret_mcp_server.py"
     script.write_text(
         """
 import io, json, sys
@@ -188,17 +167,8 @@ def main() -> int:
         elif method == 'tools/list':
             tools = [
                 {
-                    'name': 'echo',
-                    'description': 'Echo back text',
-                    'inputSchema': {
-                        'type': 'object',
-                        'properties': {'text': {'type': 'string'}},
-                        'required': ['text'],
-                    },
-                },
-                {
                     'name': 'secret',
-                    'description': 'Should not be exposed',
+                    'description': 'Returns code',
                     'inputSchema': {
                         'type': 'object',
                         'properties': {'code': {'type': 'string'}},
@@ -210,10 +180,7 @@ def main() -> int:
         elif method == 'tools/call':
             name = params.get('name')
             arguments = params.get('arguments') or {}
-            if name == 'echo':
-                text = arguments.get('text', '')
-                write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'result': {'content': text}})
-            elif name == 'secret':
+            if name == 'secret':
                 code = arguments.get('code', '')
                 write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'result': {'secret': code}})
             else:
@@ -232,13 +199,74 @@ if __name__ == '__main__':
     return script
 
 
-def test_gateway_lists_and_calls_filtered_tools(tmp_path: Path, monkeypatch) -> None:
-    # Arrange: multi-tool local server
-    server_script = _write_multi_tool_server_script(tmp_path)
+
+def test_mcp_stdio_echo(tmp_path: Path) -> None:
+    from magent2.tools.mcp.client import MCPClient, spawn_stdio_server
+
+    server_script = _write_echo_server_script(tmp_path)
     cmd = [sys.executable, "-u", str(server_script)]
-    # Configure via env for agent "DevAgent"
+
+    client: MCPClient
+    with spawn_stdio_server(cmd) as client:
+        init = client.initialize()
+        assert init["protocolVersion"] == "1.0"
+
+        tools = client.list_tools()
+        names = [t["name"] for t in tools]
+        assert "echo" in names
+
+        result = client.call_tool("echo", {"text": "hello"})
+        assert result["content"] == "hello"
+
+
+def test_gateway_with_echo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    server_script = _write_echo_server_script(tmp_path)
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_CMD", sys.executable)
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_ARGS", f"-u,{server_script}")
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_ALLOW", "echo")
+
+    from magent2.tools.mcp.registry import load_for_agent
+    from magent2.tools.mcp.config import load_agent_mcp_configs
+
+    cfgs = load_agent_mcp_configs("DevAgent")
+    assert len(cfgs) == 1
+    assert cfgs[0].allow is not None and "echo" in cfgs[0].allow
+    gateway = load_for_agent("DevAgent")
+    assert gateway is not None
+    try:
+        # Sanity: underlying client should see the echo tool
+        client_tools = gateway._clients[0].list_tools()  # type: ignore[attr-defined]
+        client_names = {t["name"] for t in client_tools}
+        assert "echo" in client_names
+        tools = gateway.list_tools()
+        names = {t.name for t in tools}
+        assert names == {"echo"}
+        result = gateway.call("echo", {"text": "ok"})
+        assert result["content"] == "ok"
+    finally:
+        gateway.close()
+
+def test_gateway_cleanup_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    server_script = _write_echo_server_script(tmp_path)
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_CMD", sys.executable)
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_ARGS", f"-u,{server_script}")
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_ALLOW", "echo")
+
+    from magent2.tools.mcp.registry import load_for_agent
+
+    gateway = load_for_agent("DevAgent")
+    assert gateway is not None
+    gateway.close()
+    # Second close should be a no-op without raising
+    gateway.close()
+
+def test_gateway_lists_and_calls_filtered_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange: local echo server; allowlist only echo
+    echo_script = _write_echo_server_script(tmp_path)
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_CMD", sys.executable)
+    monkeypatch.setenv("AGENT_DevAgent_MCP_0_ARGS", f"-u,{echo_script}")
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_ALLOW", "echo")
 
     from magent2.tools.mcp.registry import load_for_agent
@@ -259,5 +287,3 @@ def test_gateway_lists_and_calls_filtered_tools(tmp_path: Path, monkeypatch) -> 
             pass
     finally:
         gateway.close()
-
-
