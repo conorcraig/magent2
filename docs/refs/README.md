@@ -19,6 +19,39 @@ This file captures the core information we rely on. Links are provided only as j
 
 References: Redis Streams overview; XADD/XREADGROUP/XPENDING docs.
 
+Example (redis-py – append and read):
+
+```python
+import json, uuid, redis
+
+r = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True)
+topic = "chat:example"
+
+# Append with canonical UUID + JSON payload
+bus_id = str(uuid.uuid4())
+r.xadd(topic, {"id": bus_id, "payload": json.dumps({"content": "hello"})})
+
+# Tail read last 10 entries (no group)
+entries = r.xrevrange(topic, "+", "-", count=10) or []
+entries.reverse()
+for entry_id, fields in entries:
+    payload = json.loads(fields.get("payload", "{}"))
+    print(entry_id, fields.get("id"), payload)
+
+# Consumer group read + ack
+group, consumer = "g1", "c1"
+try:
+    r.xgroup_create(topic, group, id="0", mkstream=True)
+except Exception as e:
+    if "BUSYGROUP" not in str(e):
+        raise
+resp = r.xreadgroup(groupname=group, consumername=consumer, streams={topic: ">"}, count=10, block=0)
+for _, items in (resp or []):
+    for entry_id, fields in items:
+        # process ...
+        r.xack(topic, group, entry_id)
+```
+
 ## Server‑Sent Events (SSE) (Gateway streaming)
 - Protocol: HTTP response with Content-Type: text/event-stream. Events are lines prefixed with data: , separated by a blank line.
 - Multiple data lines per event are allowed; clients concatenate them. We emit one JSON per event line.
@@ -28,6 +61,30 @@ References: Redis Streams overview; XADD/XREADGROUP/XPENDING docs.
 
 References: MDN SSE; FastAPI StreamingResponse; reverse proxy buffering notes.
 
+Example (FastAPI SSE endpoint + JS client):
+
+```python
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+import asyncio, json
+
+app = FastAPI()
+
+async def event_gen():
+    for i in range(3):
+        yield f"data: {json.dumps({'event':'token','i':i})}\n\n"
+        await asyncio.sleep(0.05)
+
+@app.get("/stream")
+async def stream():
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+```
+
+```javascript
+const es = new EventSource("/stream");
+es.onmessage = (e) => console.log(JSON.parse(e.data));
+```
+
 ## Model Context Protocol (MCP) (stdio JSON‑RPC)
 - Framing: Each message is Content-Length: <n>\r\n, blank line, then n bytes of JSON (UTF‑8).
 - Protocol: JSON‑RPC 2.0 – request has id, method, params. Response has id, result or error.
@@ -35,6 +92,20 @@ References: MDN SSE; FastAPI StreamingResponse; reverse proxy buffering notes.
 - Robustness: enforce read timeouts, validate Content‑Length, handle EOF; serialize requests, match responses by numeric id.
 
 References: modelcontextprotocol.io docs/spec.
+
+Example (using our MCP client):
+
+```python
+from magent2.tools.mcp.client import spawn_stdio_server
+
+# Replace with a real server, e.g.: ["npx","-y","@modelcontextprotocol/server-memory"]
+cmd = ["your-mcp-server", "--stdio"]
+with spawn_stdio_server(cmd) as client:
+    client.initialize()
+    tools = client.list_tools()
+    print(tools)
+    # res = client.call_tool("tool_name", {"arg": 1})
+```
 
 ## Observability (traces, logs, metrics)
 - Correlation: include conversation_id and a per‑run run_id on all logs and events.
@@ -45,6 +116,28 @@ References: modelcontextprotocol.io docs/spec.
 
 References: OpenTelemetry Python; Python logging cookbook.
 
+Example (minimal JSON logging with correlation):
+
+```python
+import json, logging, sys
+
+class JsonHandler(logging.StreamHandler):
+    def emit(self, record):
+        msg = {
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "run_id": getattr(record, "run_id", None),
+            "conversation_id": getattr(record, "conversation_id", None),
+        }
+        sys.stdout.write(json.dumps(msg) + "\n")
+
+logger = logging.getLogger("magent2")
+logger.setLevel(logging.INFO)
+logger.addHandler(JsonHandler())
+
+logger.info("run_started", extra={"run_id": "r1", "conversation_id": "c1"})
+```
+
 ## Safe subprocess (Terminal tool)
 - Never use shell=True; build argv with shlex.split and pass to Popen.
 - Environment: start from a minimal map; set safe PATH; inject only explicit allowlisted env vars.
@@ -54,12 +147,42 @@ References: OpenTelemetry Python; Python logging cookbook.
 
 References: Python subprocess docs; OWASP Command Injection.
 
+Example (safe subprocess with timeout + process‑group kill):
+
+```python
+import os, shlex, signal
+from subprocess import Popen, DEVNULL, PIPE, TimeoutExpired
+
+argv = shlex.split("echo hello")
+env = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+proc = Popen(argv, stdin=DEVNULL, stdout=PIPE, stderr=PIPE, text=True, start_new_session=True, env=env)
+try:
+    out, err = proc.communicate(timeout=2)
+except TimeoutExpired:
+    os.killpg(proc.pid, signal.SIGKILL)
+    out, err = proc.communicate()
+print(out)
+```
+
 ## Docker + pytest‑docker (E2E)
 - Compose healthcheck gates service readiness; tests should wait until responsive (e.g., HTTP /health) before proceeding.
 - Avoid fixed host ports in tests; discover host port via docker_services.port_for(service, internal_port).
 - Keep a single compose file as source of truth; parameterize ports with env vars for local pinning if needed.
 
 References: pytest‑docker docs; Compose healthcheck docs.
+
+Example (pytest‑docker wait + dynamic port):
+
+```python
+def is_responsive(url: str) -> bool: ...
+
+def test_stack(docker_services):
+    port = docker_services.port_for("gateway", 8000)
+    docker_services.wait_until_responsive(
+        timeout=60.0, pause=0.5,
+        check=lambda: is_responsive(f"http://localhost:{port}/health"),
+    )
+```
 
 ## Quality gates (Ruff, mypy, secrets, complexity)
 - Ruff: checks + formatter; keep config minimal and project‑wide.
@@ -69,12 +192,39 @@ References: pytest‑docker docs; Compose healthcheck docs.
 
 References: Ruff, mypy, detect‑secrets, Xenon/Radon docs.
 
+Examples:
+
+```toml
+[tool.mypy]
+disallow_untyped_defs = true
+no_implicit_optional = true
+```
+
+```bash
+uv run ruff check && uv run mypy && uv run pytest -q
+```
+
 ## uv + GitHub Actions (CI)
 - Use uv to install/sync; cache uv downloads/venv to speed builds.
 - Cancel in‑progress jobs per branch to reduce churn; emit JUnit/JSON reports as artifacts.
 - Keep CI steps: ruff check/format (dry run), mypy, pytest (unit/e2e), secrets scan.
 
 References: uv + GitHub Actions guide; GHA caching docs.
+
+Example (GitHub Actions steps with uv):
+
+```yaml
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/uv-action@v1
+      - run: uv sync
+      - run: uv run ruff check
+      - run: uv run mypy
+      - run: uv run pytest -q
+```
 
 ## OpenAI platform (general)
 - Rate limits: plan retry/backoff for model calls; consider token budgets.
