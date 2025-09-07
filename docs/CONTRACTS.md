@@ -26,6 +26,10 @@ Fields:
 - `OutputEvent`: `{ event: "output", conversation_id, text: str, usage?:
   dict }`
 
+Note: the `event` discriminator is present on all three event models in code
+(`TokenEvent`, `ToolStepEvent`, `OutputEvent`) and should be used by clients
+to multiplex SSE or other streaming transports.
+
 ## Bus API (v1)
 
 Source: `magent2/bus/interface.py`

@@ -1,8 +1,8 @@
-## Handover: Integrate OpenAI Agents SDK Runner into Worker (#33)
+# Handover: Integrate OpenAI Agents SDK Runner into Worker (#33)
 
 Owner: next agent picking up Issue #33
 
-### Context
+## Context
 
 - Goal: Implement a real Runner using the OpenAI Agents SDK; map streamed SDK events → `TokenEvent`/`ToolStepEvent`/`OutputEvent`; maintain session per `conversation_id`; echo fallback when `OPENAI_API_KEY` is unset.
 - Contracts v1 are frozen: see `magent2/models/envelope.py` and `docs/CONTRACTS.md`. Do not change event shapes or envelope fields.
@@ -12,7 +12,7 @@ Owner: next agent picking up Issue #33
   - Gateway publishes inbound to both `chat:{conversation_id}` and `chat:{agent_name}`; streams SSE from `stream:{conversation_id}`. Tests cover this.
 - References: see `docs/refs/openai-agents-sdk.md` (SDK docs index) and the upstream docs site.
 
-### Deliverables
+## Deliverables
 
 - SDK-backed Runner implementing the `Runner` protocol.
 - Streaming mapping from SDK events to our v1 events (`TokenEvent`, `ToolStepEvent`, `OutputEvent`) with preserved ordering and `conversation_id`.
@@ -20,16 +20,16 @@ Owner: next agent picking up Issue #33
 - Runner selection: echo fallback if `OPENAI_API_KEY` is missing; otherwise use SDK-backed runner.
 - Tests for event mapping, session reuse, and runner selection.
 
-### High-level design
+## High-level design
 
-1) Runner adapter
+1. Runner adapter
 
 - Add module `magent2/runner/openai_agents_runner.py` with class `OpenAIAgentsRunner` implementing the `Runner` protocol (`stream_run(self, envelope)` returns a Python iterator).
 - Bridge async SDK streaming → sync iterator:
   - Start an asyncio task in a dedicated thread that drives the SDK's streaming API (see docs: Runner.run_streamed → result.stream_events()).
   - Use a `queue.Queue` to hand over mapped events to the sync generator; yield from the queue until a sentinel indicates completion. This preserves streaming semantics within our existing synchronous `Worker` loop.
 
-2) SDK agent/session configuration
+1. SDK agent/session configuration
 
 - Add `magent2/runner/config.py` to load environment:
   - `OPENAI_API_KEY` — presence toggles SDK vs echo.
@@ -40,21 +40,21 @@ Owner: next agent picking up Issue #33
 - Construct an SDK `Agent` from `agents` package using model/instructions/tools.
 - Maintain `self._sessions: dict[str, Session]` in the runner; get-or-create per `conversation_id`. Consider simple bound LRU (e.g., 256) to avoid unbounded memory.
 
-3) Event mapping (SDK → v1 events)
+1. Event mapping (SDK → v1 events)
 
 - TokenEvent: map low-level model text delta events. In SDK streaming, these surface via a "raw response" stream event carrying a `ResponseTextDeltaEvent` (see docs examples). Convert each delta to `TokenEvent(conversation_id, text, index)` where `index` monotonically increments per run.
 - ToolStepEvent: map tool call/return milestones. In SDK streaming, these appear as run-item events. Emit a `ToolStepEvent` when a tool is invoked with `name` (e.g., function name) and `args` (parsed JSON/dict). When a tool returns, emit a `ToolStepEvent` with `result_summary` (shortened string or status). Keep args/result small; avoid dumping large payloads.
 - OutputEvent: when final agent output becomes available (end of run), emit `OutputEvent(conversation_id, text=final_text, usage=? if exposed by SDK)`. If usage metrics are available in the result, attach as a small dict.
 - Preserve ordering exactly as produced by the SDK stream; the queue handoff preserves order.
 
-4) Runner selection wiring
+1. Runner selection wiring
 
 - Update `magent2/worker/__main__.py` to select a runner at startup:
   - If `OPENAI_API_KEY` is unset → use `EchoRunner` (existing behavior).
   - Else → instantiate `OpenAIAgentsRunner(config=...)`.
   - No other behavior changes; `Worker` stays synchronous.
 
-5) Tests (TDD additions)
+1. Tests (TDD additions)
 
 - New tests (no network; stub SDK):
   - `tests/test_runner_sdk.py`:
@@ -63,7 +63,7 @@ Owner: next agent picking up Issue #33
   - `tests/test_worker.py` additions:
     - Test runner selection logic in `__main__`: monkeypatch env to unset/set `OPENAI_API_KEY` and ensure appropriate class is chosen.
 
-### Implementation notes
+## Implementation notes
 
 - Imports (SDK): per docs examples, the package exposes `Agent`, `Runner`, and tool decorators from the top-level `agents` module. Token delta events come from `openai.types.responses`.
   - Required:
@@ -82,7 +82,7 @@ from agents import Runner as SDKRunner  # SDK class
 # In adapter implementation, call SDKRunner.run_streamed(...)
 ```
 
-### SDK usage cheatsheet (no web needed)
+## SDK usage cheatsheet (no web needed)
 
 Use these snippets with `openai-agents>=0.2.11` (see `pyproject.toml`).
 
@@ -128,28 +128,28 @@ Notes:
 - If `rs.get_final_output()` (or similar) is unavailable, accumulate token deltas during iteration and emit a single `OutputEvent` at the end with the joined text.
 - If tools are configured, prefer emitting `ToolStepEvent` at invocation time (with args) and another at completion with `result_summary` (short string).
 
-### Event mapping table (SDK → v1)
+## Event mapping table (SDK → v1)
 
 - **raw_response_event + ResponseTextDeltaEvent(delta: str)** → `TokenEvent(text=delta, index=++)`
 - **run_item_stream_event (tool invocation)** → `ToolStepEvent(name=<tool>, args=<dict>)`
 - **run_item_stream_event (tool result)** → `ToolStepEvent(name=<tool>, result_summary=<short>)`
 - **assistant/output message end (or stream completion)** → `OutputEvent(text=<final_text>, usage=? if available)`
 
-### Session hints (SDK)
+## Session hints (SDK)
 
 - Sessions preserve conversation history. If a concrete `Session` class is available in your installed SDK version, prefer passing it to `Runner.run_streamed(..., session=...)`.
 - Example path for a persistent session (check your installed package):
   - `from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession`  # if available
   - Otherwise, keep an in-memory map of session-like objects or pass `None` and rely on stateless runs for now. Our adapter will still maintain per-`conversation_id` state if needed.
 
-### File changes (planned)
+## File changes (planned)
 
 - Add `magent2/runner/openai_agents_runner.py`
 - Add `magent2/runner/config.py`
 - Edit `magent2/worker/__main__.py` (runner selection)
 - Add tests: `tests/test_runner_sdk.py` (+ small updates in `tests/test_worker.py` as needed)
 
-### Pseudocode sketch (adapter outline)
+## Pseudocode sketch (adapter outline)
 
 ```python
 class OpenAIAgentsRunner(Runner):
@@ -187,24 +187,24 @@ class OpenAIAgentsRunner(Runner):
         ...
 ```
 
-### Risks and mitigations
+## Risks and mitigations
 
 - SDK API drift: Keep mapping tolerant to shape differences; prefer feature checks over strict isinstance to avoid tight coupling.
 - Blocking behavior: The adapter uses a thread to avoid blocking the main loop; ensure proper teardown and sentinel signaling.
 - Large tool args/results: Truncate or summarize in `result_summary` to limit event size.
 
-### Out of scope (for this issue)
+## Out of scope (for this issue)
 
 - Tool implementations (terminal/todo/MCP) and guardrails.
 - Handoffs between multiple agents.
 - Observability/tracing wiring.
 
-### Validation
+## Validation
 
 - Run locally: `just check` (format, lint, types, complexity, secrets, tests).
 - Manual smoke: run gateway + worker; send a message; stream SSE and observe token → output events. Without `OPENAI_API_KEY` set, output should echo input.
 
-### Next steps for you
+## Next steps for you
 
 1) Implement files per plan (adapter + config + wiring) and add tests. Keep contracts untouched.
 2) Ensure runner selection (echo vs SDK) works via env.
