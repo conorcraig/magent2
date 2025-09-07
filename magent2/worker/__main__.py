@@ -21,7 +21,7 @@ class EchoRunner(Runner):
 def build_runner_from_env() -> Runner:
     cfg = load_config()
     if cfg.api_key:
-        agent = Agent(name=cfg.agent_name, instructions=cfg.instructions)
+        agent = Agent(name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model)
         return OpenAIAgentsRunner(agent)
     return EchoRunner()
 
