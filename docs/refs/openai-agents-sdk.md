@@ -93,3 +93,99 @@ Links are relative to `https://openai.github.io/openai-agents-python/`.
     ├── [result](/ref/voice/result/)
     ├── [utils](/ref/voice/utils/)
     └── [workflow](/ref/voice/workflow/)
+
+---
+
+## Offline cheatsheet (Python SDK)
+
+Works with `openai-agents>=0.2.11` (see `pyproject.toml`). These are the concrete imports and patterns we use in magent2.
+
+### Imports
+
+```python
+from agents import Agent, Runner
+# Optional tool decorator
+from agents import function_tool
+
+# Token delta events for streaming
+from openai.types.responses import ResponseTextDeltaEvent
+```
+
+### Minimal agent (chat-only)
+
+```python
+from agents import Agent, Runner
+
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant.",
+)
+
+# Sync call (non-streaming)
+result = Runner.run_sync(agent, "Say hi")
+print(result.final_output)  # string
+```
+
+### Streaming events (async)
+
+```python
+import asyncio
+from agents import Agent, Runner
+from openai.types.responses import ResponseTextDeltaEvent
+
+async def main() -> None:
+    agent = Agent(name="Assistant", instructions="Be concise.")
+    rs = Runner.run_streamed(agent, input="Tell me a joke")
+
+    async for ev in rs.stream_events():
+        # Common types (string identifiers on ev.type):
+        # - "raw_response_event" → low-level model deltas (OpenAI Responses API)
+        # - "run_item_stream_event" → agent steps (tool calls/results, messages)
+        # - "agent_updated_stream_event" → agent handoff/updates (often ignorable)
+        if ev.type == "raw_response_event" and isinstance(ev.data, ResponseTextDeltaEvent):
+            print(ev.data.delta, end="", flush=True)  # token chunk
+        elif ev.type == "run_item_stream_event":
+            data = ev.data  # may be typed object or dict-like
+            # Heuristics:
+            # - tool invocation → has tool name + arguments
+            # - tool result → contains result/output; summarize
+            # - assistant message → accumulate for final output
+
+asyncio.run(main())
+```
+
+### Mapping guidance (for magent2 v1 events)
+
+- raw_response_event + `ResponseTextDeltaEvent.delta` → TokenEvent(text=delta, index++)
+- run_item_stream_event (tool invocation) → ToolStepEvent(name=<tool>, args=<dict>)
+- run_item_stream_event (tool result) → ToolStepEvent(name=<tool>, result_summary=<short>)
+- final assistant message or end-of-stream → OutputEvent(text=<final_text>, usage=? if available)
+
+### Sessions (conversation memory)
+
+- Pass a session object to preserve history across runs: `Runner.run_streamed(agent, input=..., session=session)`.
+- If available in your installed version, a persistent session can be imported as:
+  ```python
+  from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession  # if present
+  session = SQLAlchemySession("sqlite:///./agents.db", key="conv_123")
+  ```
+- If unavailable, keep an in-memory dict keyed by `conversation_id` and reuse the same object (or `None`) consistently.
+
+### Tools (optional)
+
+```python
+from agents import Agent, Runner, function_tool
+
+@function_tool
+def add(a: int, b: int) -> int:
+    return a + b
+
+agent = Agent(name="MathAgent", instructions="Use tools when helpful.", tools=[add])
+result = Runner.run_sync(agent, "What is 2+3?")
+```
+
+### Pitfalls
+
+- Event shapes may evolve; prefer feature checks over strict type equality.
+- Some SDK objects are dict-like and typed; try attribute access first, then `get`.
+- If no explicit final output API is exposed by your version, accumulate token deltas and emit that as final output.
