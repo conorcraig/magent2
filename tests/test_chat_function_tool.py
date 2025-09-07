@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import os
-from typing import Iterable
+from collections.abc import Iterable
 
 import pytest
 
@@ -44,7 +43,9 @@ def _last_message(bus: InMemoryBus, topic: str) -> BusMessage:
     return messages[-1]
 
 
-def test_publish_to_conversation_topic_for_chat_recipient(bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_to_conversation_topic_for_chat_recipient(
+    bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Ensure deterministic sender
     monkeypatch.setenv("AGENT_NAME", "Tester")
 
@@ -61,7 +62,9 @@ def test_publish_to_conversation_topic_for_chat_recipient(bus: InMemoryBus, monk
     assert isinstance(payload["created_at"], str)
 
 
-def test_publish_to_conversation_and_agent_topics_for_agent_recipient(bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_to_conversation_and_agent_topics_for_agent_recipient(
+    bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENT_NAME", "Tester")
     monkeypatch.setenv("CHAT_TOOL_CONVERSATION_ID", "conv2")
 
@@ -89,4 +92,3 @@ def test_invalid_recipient_raises_value_error(bus: InMemoryBus, bad_recipient: s
 def test_blank_content_raises_value_error(bus: InMemoryBus, bad_content: str) -> None:
     with pytest.raises(ValueError):
         send_message("chat:convX", bad_content)
-

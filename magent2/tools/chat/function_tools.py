@@ -6,7 +6,6 @@ from typing import Any
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import MessageEnvelope
 
-
 _TEST_BUS: Bus | None = None
 
 
@@ -19,7 +18,7 @@ def _get_bus() -> Bus:
     if _TEST_BUS is not None:
         return _TEST_BUS
     # Lazy import to avoid hard dependency in tests
-    from magent2.bus.redis_adapter import RedisBus  # type: ignore
+    from magent2.bus.redis_adapter import RedisBus
 
     url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     return RedisBus(url)
@@ -30,9 +29,7 @@ def _resolve_sender() -> str:
     return f"agent:{name}" if name else "agent:unknown"
 
 
-def _resolve_conversation_id(
-    recipient: str, ctx: dict[str, Any] | None
-) -> str:
+def _resolve_conversation_id(recipient: str, ctx: dict[str, Any] | None) -> str:
     if recipient.startswith("chat:"):
         cid = recipient.split(":", 1)[1]
         if cid:
@@ -97,4 +94,3 @@ def send_message(
     bus = _get_bus()
     published_to = _publish(bus, env)
     return {"ok": True, "envelope_id": env.id, "published_to": published_to}
-
