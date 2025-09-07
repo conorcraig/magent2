@@ -9,6 +9,9 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from magent2.bus.interface import Bus, BusMessage
+from magent2.observability import get_json_logger
+
+log = get_json_logger("gateway")
 
 
 def create_app(bus: Bus) -> FastAPI:
@@ -48,6 +51,21 @@ def create_app(bus: Bus) -> FastAPI:
             if agent_name:
                 agent_topic = f"chat:{agent_name}"
                 bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=message))
+
+        # Minimal structured log for visibility (without leaking full payload)
+        content_val = str(message.get("content", ""))
+        log.info(
+            "inbound_message",
+            extra={
+                "event": "inbound_message",
+                "metadata": {
+                    "conversation_id": message.get("conversation_id"),
+                    "recipient": recipient,
+                    "len": len(content_val),
+                    "snippet": content_val[:120],
+                },
+            },
+        )
 
         return {"status": "ok", "topic": conv_topic}
 
