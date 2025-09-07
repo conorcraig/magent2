@@ -1,60 +1,44 @@
 name: CI
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-  build:
+  quality:
+    name: Quality (ruff, mypy ratchet, complexity ratchet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup uv
+      - name: Set up uv
         uses: astral-sh/setup-uv@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-
-      - name: Sync dependencies
-        run: uv sync --locked
-
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync --frozen --group dev
       - name: Ruff format (check)
-        run: uv run ruff format --check
+        run: uv run ruff format --check .
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+      - name: Type check (mypy + baseline ratchet)
+        run: bash .github/scripts/ci/type_check.sh
+      - name: Complexity check (xenon + baseline ratchet)
+        run: bash .github/scripts/ci/complexity_check.sh
+      - name: Secrets detection (detect-secrets)
+        run: uv run detect-secrets scan | diff -u .baseline-secrets -
 
-      - name: Ruff check
-        run: uv run ruff check
-
-      - name: Mypy
-        run: |
-          # Filter through mypy-baseline if baseline file exists
-          if [ -f mypy-baseline.txt ]; then
-            uv run mypy | uv run mypy-baseline filter
-          else
-            uv run mypy
-          fi
-
-      - name: Pytest
-        run: |
-          mkdir -p reports
-          uv run pytest --junitxml=reports/junit.xml --json-report --json-report-file=reports/pytest-report.json
-
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
         with:
-          name: test-reports
-          path: reports/
-
-      - name: Xenon complexity gate
-        run: |
-          # Fail if any function exceeds B, and keep module/avg at A
-          uv run xenon --max-absolute B --max-modules A --max-average A magent2 scripts
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync --frozen --group dev
+      - name: Run tests
+        run: uv run pytest -q

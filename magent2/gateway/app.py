@@ -21,9 +21,19 @@ def create_app(bus: Bus) -> FastAPI:
         except Exception as exc:  # pragma: no cover - defensive
             raise HTTPException(status_code=400, detail="invalid envelope") from exc
 
-        topic = f"chat:{message['conversation_id']}"
-        bus.publish(topic, BusMessage(topic=topic, payload=message))
-        return {"status": "ok", "topic": topic}
+        # Always publish to conversation topic for compatibility
+        conv_topic = f"chat:{message['conversation_id']}"
+        bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=message))
+
+        # Additionally publish to agent topic when recipient hints an agent
+        recipient = str(message.get("recipient", ""))
+        if recipient.startswith("agent:"):
+            agent_name = recipient.split(":", 1)[1] or ""
+            if agent_name:
+                agent_topic = f"chat:{agent_name}"
+                bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=message))
+
+        return {"status": "ok", "topic": conv_topic}
 
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:

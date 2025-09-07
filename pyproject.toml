@@ -46,6 +46,7 @@ python_files = ["test_*.py"]
 
 [dependency-groups]
 dev = [
+    "detect-secrets>=1.5.0",
     "mypy>=1.17.1",
     "mypy-baseline>=0.7.3",
     "pre-commit>=4.3.0",
