@@ -121,6 +121,26 @@ curl -N http://localhost:8000/stream/conv1
 - Pre-commit (staged files): `uv run pre-commit run`
 - Full local quality gate: `just check`
 
+## Todo function tools
+
+Agents SDK function tools backed by a Redis store:
+
+- `todo_create(conversation_id: str, title: str, metadata: dict | None = None)` → `{ "task": { ... } }`
+- `todo_get(task_id: str)` → `{ "task": { ... } }` or `{ "task": null }`
+- `todo_list(conversation_id: str)` → `{ "tasks": [ { ... }, ... ] }`
+- `todo_update(task_id: str, *, title: str | None = None, completed: bool | None = None, metadata: dict | None = None)` → `{ "task": { ... } }` or `{ "task": null }`
+- `todo_delete(task_id: str)` → `{ "ok": bool }`
+
+Notes:
+
+- Task objects are JSON-safe via `model_dump(mode="json")` (RFC3339 datetimes).
+- On transient Redis errors, tools return a compact error shape, e.g., `{ "task": null, "error": "...", "transient": true }`.
+
+Environment:
+
+- `REDIS_URL` (required at runtime; tests use Docker-based Redis via `pytest-docker`).
+- `TODO_STORE_PREFIX` (optional, defaults to `todo`) to isolate keys per environment/test.
+
 ## Entry points
 
 - Gateway ASGI app: `magent2.gateway.asgi:app`
