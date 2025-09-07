@@ -33,6 +33,9 @@ class StreamPrinter:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._print_lock = threading.Lock()
+        # One-shot coordination: set when a final OutputEvent is observed
+        self._final_event = threading.Event()
+        self._final_text: str | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -108,10 +111,22 @@ class StreamPrinter:
             # Ensure newline then print final text line
             self._println("")
             self._println(f"AI> {text}")
+            # Signal one-shot completion
+            self._final_text = text
+            self._final_event.set()
             return
         # Fallback
         self._println("")
         self._println(f"[event] {json.dumps(data)[:500]}")
+
+    # ----- one-shot helpers -----
+    def wait_for_final(self, timeout: float | None) -> tuple[bool, str | None]:
+        """Block until an OutputEvent arrives or timeout.
+
+        Returns (ok, final_text)
+        """
+        ok = self._final_event.wait(timeout=timeout)
+        return ok, (self._final_text if ok else None)
 
 
 def _send_message(cfg: ClientConfig, content: str) -> None:
@@ -170,6 +185,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--conv", default=f"conv-{str(uuid.uuid4())[:8]}")
     p.add_argument("--agent", default=os.getenv("AGENT_NAME", "DevAgent"))
     p.add_argument("--sender", default=_default_sender())
+    # One-shot mode: send a single message and exit after final output (or timeout)
+    p.add_argument(
+        "--message",
+        help="Send a single message non-interactively, then exit after final output",
+    )
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.getenv("MAGENT2_CLIENT_TIMEOUT", "60")),
+        help="Timeout in seconds for one-shot mode (default 60)",
+    )
     return p.parse_args(argv)
 
 
@@ -215,6 +241,24 @@ def repl(cfg: ClientConfig) -> None:
         stream.stop()
 
 
+def one_shot(cfg: ClientConfig, message: str, timeout: float) -> int:
+    """Send a single message and stream until the final OutputEvent or timeout.
+
+    Returns exit code: 0 on success, non-zero on timeout or send error.
+    """
+    stream = StreamPrinter(cfg)
+    stream.start()
+    try:
+        _send_message(cfg, message)
+        ok, _final = stream.wait_for_final(timeout=timeout)
+        if not ok:
+            print("\n[client] timeout waiting for final output", file=sys.stderr)
+            return 2
+        return 0
+    finally:
+        stream.stop()
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     base_url = str(args.base_url)
@@ -226,6 +270,10 @@ def main(argv: list[str] | None = None) -> None:
         agent_name=str(args.agent),
         sender=str(args.sender),
     )
+    if args.message:
+        code = one_shot(cfg, str(args.message), float(args.timeout))
+        # Explicit exit for clarity when running under automation
+        raise SystemExit(code)
     repl(cfg)
 
 
