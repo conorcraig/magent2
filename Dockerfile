@@ -24,16 +24,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
- && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy venv and app
-COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /app /app
+# Create non-root user before copying so ownership can be set at copy time
+RUN useradd -m app
 
-# Non-root user
-RUN useradd -m app && chown -R app:app /app /opt/venv
+# Copy venv and app with correct ownership without a slow recursive chown layer
+COPY --from=builder --chown=app:app /opt/venv /opt/venv
+COPY --from=builder --chown=app:app /app /app
+
 USER app
 
 # Default CMD can be overridden by docker-compose per service
