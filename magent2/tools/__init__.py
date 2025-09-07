@@ -1,3 +1,5 @@
 """Tool packages for magent2 (terminal, todo, mcp)."""
 
-__all__ = []
+from typing import Final
+
+__all__: Final[list[str]] = []
