@@ -40,7 +40,7 @@ repos:
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: ["--baseline", ".secrets.baseline"]
+        args: ["--baseline", ".baseline-secrets"]
 
 fail_fast: false
 minimum_pre_commit_version: "3.0.0"
