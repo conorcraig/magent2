@@ -19,6 +19,12 @@ with spawn_stdio_server(cmd) as client:
     # res = client.call_tool("tool_name", {"arg": 1})
 ```
 
+## Gateway behavior (project defaults)
+
+- Default‑deny tool exposure: server tools are only exposed if explicitly allowlisted; final exposure is allow − block.
+- Minimal environment by default: unless `ENV_JSON` is provided for a server, the gateway launches processes with a minimal env: `{ "PATH": "/usr/bin:/bin:/usr/local/bin", "LC_ALL": "C" }`.
+- Default timeouts: `initialize(timeout=5.0)`, `list_tools(timeout=3.0)`, and `call_tool(..., timeout=10.0)` are used unless overridden (per‑server init timeout via `AGENT_<Agent>_MCP_<N>_INIT_TIMEOUT_SECONDS`).
+
 ## References
 
 - modelcontextprotocol.io docs/spec; MCP GitHub org

@@ -13,6 +13,7 @@
 ## Deliverables
 
 - An Agents SDK function tool named `chat_send` that accepts `recipient` and `content`, validates addressing, constructs a canonical `MessageEnvelope`, and publishes to the correct Bus topic(s).
+  - Enhancement: optional `conversation_id` parameter (highest precedence) to avoid relying on env/context for `agent:{Name}` addressing.
 - Tests using an `InMemoryBus` test double (pattern from `tests/test_bus_interface.py`) to validate publish behavior and payload shape.
 - No changes to frozen v1 contracts; only new files under `magent2/tools/chat/` and new tests.
 
@@ -23,6 +24,7 @@
     - `chat:{conversation_id}` (direct to conversation)
     - `agent:{AgentName}` (address a specific agent)
   - `content: str` — message body (non-empty after trim)
+  - `conversation_id: str | None` — optional explicit conversation id used when `recipient` is `agent:{Name}`; precedence over context/env.
 - Validation:
   - Reject empty/whitespace `content`.
   - `recipient` must start with `chat:` or `agent:` and include a non-empty suffix.
@@ -38,27 +40,27 @@
 
 - `conversation_id`:
   - If `recipient` starts with `chat:` → derive `conversation_id` from recipient suffix.
-  - If `recipient` starts with `agent:` → obtain `conversation_id` from the Agents SDK run context if available; otherwise from environment variable `CHAT_TOOL_CONVERSATION_ID`. If neither is present, raise `ValueError("conversation_id not available for agent recipient")`.
+  - If `recipient` starts with `agent:` → resolve in precedence order: explicit parameter > Agents SDK run context (if available) > environment variable `CHAT_TOOL_CONVERSATION_ID`. If none provide a value, raise `ValueError("conversation_id not available for agent recipient")`.
 - `sender`:
   - Prefer `sender = f"agent:{AGENT_NAME}"` with `AGENT_NAME` read from environment (already used by `worker` and `compose`). Fallback to `agent:unknown` if unset (or consider raising for stricter policy).
 
 ## Bus access and testability
 
 - Provide a module-level `get_bus()` that returns a `Bus`:
-  - Default: instantiate `RedisBus` using `REDIS_URL` (matches README/compose), imported lazily to avoid import cost if unused.
-  - Tests: expose `set_bus_for_testing(bus: Bus)` to inject an `InMemoryBus` (pattern used across tests).
+  - Default: lazily construct and cache a single `RedisBus` using `REDIS_URL` (matches README/compose).
+  - Tests: expose `set_bus_for_testing(bus: Bus)` to inject an `InMemoryBus` and reset cache when set to `None`.
 - Wrap published payload with `BusMessage(topic=..., payload=<envelope_json>)`.
 
 ## File layout (new)
 
 - `magent2/tools/chat/__init__.py` — export `chat_send` (decorated) and `send_message` (undecorated helper for unit tests).
-- `magent2/tools/chat/function_tools.py` — implementation:
-  - `_resolve_conversation_id(recipient: str, ctx: dict | None) -> str`
+-- `magent2/tools/chat/function_tools.py` — implementation:
+  - `_resolve_conversation_id(recipient: str, ctx: dict | None, explicit_conversation_id: str | None) -> str`
   - `_resolve_sender() -> str`
   - `_build_envelope(conversation_id: str, sender: str, recipient: str, content: str) -> MessageEnvelope`
   - `_publish(bus: Bus, envelope: MessageEnvelope) -> list[str]` (returns list of topics)
-  - `send_message(recipient: str, content: str, *, context: dict | None = None) -> dict` — pure function used by tests
-  - Decorated tool `chat_send(recipient: str, content: str) -> dict` that calls `send_message(...)` and returns its dict
+  - `send_message(recipient: str, content: str, *, conversation_id: str | None = None, context: dict | None = None) -> dict` — pure function used by tests
+  - Decorated tool `chat_send(recipient: str, content: str, conversation_id: str | None = None) -> dict` that calls `send_message(...)` and returns its dict
   - Bus injection helpers: `_get_bus()`, `set_bus_for_testing(...)`
 
 ## SDK usage (offline)

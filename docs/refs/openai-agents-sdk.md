@@ -1,8 +1,10 @@
+# OpenAI Agents SDK — Local Reference Index
+
 You must search this docs reference page to find info, it is very extensive, has many useful examples
 
 <https://openai.github.io/openai-agents-python/>
 
-### Reference docs tree
+## Reference docs tree
 
 Links are relative to `https://openai.github.io/openai-agents-python/`.
 
@@ -154,22 +156,22 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-### Mapping guidance (for magent2 v1 events)
+## Mapping guidance (for magent2 v1 events)
 
 - raw_response_event + `ResponseTextDeltaEvent.delta` → TokenEvent(text=delta, index++)
-- run_item_stream_event (tool invocation) → ToolStepEvent(name=<tool>, args=<dict>)
-- run_item_stream_event (tool result) → ToolStepEvent(name=<tool>, result_summary=<short>)
+- run_item_stream_event (tool invocation) → ToolStepEvent(name=`tool`, args=`dict`)
+- run_item_stream_event (tool result) → ToolStepEvent(name=`tool`, result_summary=`short`)
 - final assistant message or end-of-stream → OutputEvent(text=<final_text>, usage=? if available)
 
-### Sessions (conversation memory)
+## Sessions (conversation memory)
 
 - Pass a session object to preserve history across runs: `Runner.run_streamed(agent, input=..., session=session)`.
 - If available in your installed version, a persistent session can be imported as:
 
-  ```python
-  from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession  # if present
-  session = SQLAlchemySession("sqlite:///./agents.db", key="conv_123")
-  ```
+```python
+from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession  # if present
+session = SQLAlchemySession("sqlite:///./agents.db", key="conv_123")
+```
 
 - If unavailable, keep an in-memory dict keyed by `conversation_id` and reuse the same object (or `None`) consistently.
 

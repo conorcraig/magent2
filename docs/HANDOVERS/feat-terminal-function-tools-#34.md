@@ -1,8 +1,8 @@
-## Handover: Expose Terminal tool as Agents SDK function tools (#34)
+# Handover: Expose Terminal tool as Agents SDK function tools (#34)
 
 Owner: next agent picking up Issue #34
 
-### Context
+## Context
 
 - Goal: Wrap `TerminalTool` as OpenAI Agents SDK function tools with policy guardrails: allowlist, timeout, output caps, and output redaction.
 - Contracts v1 are frozen; this work is scoped to tools only. Do not change event shapes or message envelopes.
@@ -12,15 +12,15 @@ Owner: next agent picking up Issue #34
   - Observability includes a redaction helper for logging metadata keys (`magent2/observability/__init__.py`) but not for arbitrary output text.
 - References: see `docs/refs/openai-agents-sdk.md` (SDK docs index) and upstream docs site; also `docs/refs/subprocess.md`.
 
-### Deliverables
+## Deliverables
 
 - Agents SDK-compatible "function tools" for terminal execution that enforce policy configured via environment variables.
 - Concise textual outputs for the model (redacted and truncated), separate from the lower-level byte cap in `TerminalTool`.
 - Tests validating policy enforcement, truncation, and redaction behavior at the function-tool layer.
 
-### High-level design
+## High-level design
 
-1) Function-tools module
+1. Function-tools module
 
 - Add `magent2/tools/terminal/function_tools.py` exporting function tools that the Agents SDK can register.
 - Provide a thin wrapper around `TerminalTool.run` that:
@@ -29,7 +29,7 @@ Owner: next agent picking up Issue #34
   - Redacts sensitive substrings and regex patterns from the resulting text.
   - Produces a concise string summary for the model with an additional character cap to keep responses short.
 
-2) Policy configuration (environment)
+1. Policy configuration (environment)
 
 - Env vars (all optional; safe defaults shown):
   - `TERMINAL_ALLOWED_COMMANDS` (comma-separated). Default: empty (no commands allowed unless explicitly set). Tests set this.
@@ -43,7 +43,7 @@ Owner: next agent picking up Issue #34
   - OpenAI-like API keys: `sk-[A-Za-z0-9_-]{10,}`
   - Common tokens/keys (case-insensitive): `api_key\s*[:=]`, `authorization\s*[:=]`, `token\s*[:=]`, `password\s*[:=]`, `secret\s*[:=]`
 
-3) Function-tool surface (proposed)
+1. Function-tool surface (proposed)
 
 - One primary tool to start:
   - `terminal_run(command: str, cwd: str | None = None) -> str`
@@ -57,15 +57,15 @@ Owner: next agent picking up Issue #34
   - Decorate or wrap as an SDK function tool (exact import path to confirm against docs; see "Open questions").
   - Export via package `__init__` for easy import into the runner wiring later.
 
-### File changes (planned)
+## File changes (planned)
 
 - Add: `magent2/tools/terminal/function_tools.py`
 - Edit: `magent2/tools/terminal/__init__.py` to export `terminal_run` (and policy loader if needed)
 - Add tests: `tests/test_terminal_function_tools.py`
 
-### Implementation sketch
+## Implementation sketch
 
-```
+```python
 # magent2/tools/terminal/function_tools.py
 from __future__ import annotations
 
@@ -152,7 +152,7 @@ Notes:
 
 - The example above shows a plain function; to expose as an Agents SDK function tool, decorate or wrap per the SDK API. Keep the underlying logic separate so tests can target `terminal_run` directly without requiring the SDK import.
 
-### SDK offline quick reference (OpenAI Agents SDK 0.2.11)
+## SDK offline quick reference (OpenAI Agents SDK 0.2.11)
 
 This section is a minimal, self-contained reference so you can wire function tools without internet:
 
@@ -215,45 +215,44 @@ Notes:
 - Tool functions should return compact outputs (e.g., short strings) to keep model context efficient.
 - Use our wrapper’s policy controls via environment variables listed above.
 
-### Tests (TDD additions)
+## Tests (TDD additions)
 
 - Add `tests/test_terminal_function_tools.py` covering:
-  - Disallowed command raises/blocks via wrapper (`TERMINAL_ALLOWED_COMMANDS` unset or missing entry).
-  - Timeout respected: set `TERMINAL_TIMEOUT_SECONDS=0.5` and run a sleep command via `bash -lc 'sleep 5'`.
-  - Truncation: set small `TERMINAL_OUTPUT_CAP_BYTES` and verify `summary_output` length ≤ `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS` and byte-cap is enforced by `TerminalTool`.
-  - Redaction: set `TERMINAL_REDACT_SUBSTRINGS` to include a marker printed by the command; ensure `[REDACTED]` appears and the raw token does not. Also verify built-in `sk-...` pattern masking.
-  - Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
+  1. Disallowed command raises/blocks via wrapper (`TERMINAL_ALLOWED_COMMANDS` unset or missing entry).
+  2. Timeout respected: set `TERMINAL_TIMEOUT_SECONDS=0.5` and run a sleep command via `bash -lc 'sleep 5'`.
+  3. Truncation: set small `TERMINAL_OUTPUT_CAP_BYTES` and verify `summary_output` length ≤ `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS` and byte-cap is enforced by `TerminalTool`.
+  4. Redaction: set `TERMINAL_REDACT_SUBSTRINGS` to include a marker printed by the command; ensure `[REDACTED]` appears and the raw token does not. Also verify built-in `sk-...` pattern masking.
+  5. Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
 
-Testing notes:
-
+### Testing notes
 - Reuse `tmp_path` and pattern from `tests/test_terminal_tool.py` where helpful.
 - Use `monkeypatch.setenv` to configure env per test to avoid cross-test contamination.
 
-### Wiring (follow-up)
+## Wiring (follow-up)
 
 - The runner wiring to actually register these function tools with a real SDK Agent is a small follow-up once Issue #33 lands. The wrappers are self-contained and can be imported and provided to the Agent configuration.
 
-### Risks and mitigations
+## Risks and mitigations
 
 - SDK API surface for function tools might differ (decorator name/import path). Keep the core wrapper function independent from SDK and add the decorator in a thin layer once verified.
 - Excessive outputs: enforced at two levels (byte-cap in `TerminalTool`, char-cap in returned string). Tests validate both where applicable.
 - Redaction overreach: configurable via env; invalid regex patterns are ignored to avoid runtime failures.
 
-### Validation
+## Validation
 
 - Local quality gate: `just check` (format, lint, types, complexity, secrets, tests).
 - Manual smoke: set `TERMINAL_ALLOWED_COMMANDS=echo` then call `terminal_run("echo hello")` from a small harness; confirm concise, redacted output and `ok=true`.
 
-### Open questions (leave for implementor)
+## Open questions (leave for implementor)
 
 - Confirm the exact Agents SDK function-tool decorator and import path for version `openai-agents>=0.2.11`. Likely candidates (check docs site referenced by `docs/refs/openai-agents-sdk.md`):
   - A decorator in a `tool` or `function_schema` module.
   - A factory that wraps a Python function into a Tool object.
 - Once confirmed, apply the decorator to `terminal_run` (or a thin wrapper) and export it.
 
-### Next steps for you
+## Next steps for you
 
-1) Implement `function_tools.py` and tests per the sketch; keep contracts untouched.
-2) Verify SDK decorator import path and decorate `terminal_run` accordingly.
-3) Export from `magent2/tools/terminal/__init__.py` and wire into the SDK Agent in the runner once #33 is in place.
-4) Validate with `just check`.
+1. Implement `function_tools.py` and tests per the sketch; keep contracts untouched.
+2. Verify SDK decorator import path and decorate `terminal_run` accordingly.
+3. Export from `magent2/tools/terminal/__init__.py` and wire into the SDK Agent in the runner once #33 is in place.
+4. Validate with `just check`.
