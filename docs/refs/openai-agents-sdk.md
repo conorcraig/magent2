@@ -156,14 +156,14 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-### Mapping guidance (for magent2 v1 events)
+## Mapping guidance (for magent2 v1 events)
 
 - raw_response_event + `ResponseTextDeltaEvent.delta` → TokenEvent(text=delta, index++)
 - run_item_stream_event (tool invocation) → ToolStepEvent(name=`tool`, args=`dict`)
 - run_item_stream_event (tool result) → ToolStepEvent(name=`tool`, result_summary=`short`)
 - final assistant message or end-of-stream → OutputEvent(text=<final_text>, usage=? if available)
 
-### Sessions (conversation memory)
+## Sessions (conversation memory)
 
 - Pass a session object to preserve history across runs: `Runner.run_streamed(agent, input=..., session=session)`.
 - If available in your installed version, a persistent session can be imported as:
