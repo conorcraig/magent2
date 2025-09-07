@@ -34,6 +34,8 @@ services:
     build: .
     image: magent2/worker:local
     working_dir: /app
+    env_file:
+      - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
       - AGENT_NAME=${AGENT_NAME:-DevAgent}
