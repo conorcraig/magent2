@@ -85,7 +85,8 @@ class RedisBus(Bus):
         found = False
         while True:
             # Fetch in chunks to avoid pulling the entire stream for very large topics
-            chunk = self._redis.xrange(topic, cursor, "+", count=max(limit * 2, 100)) or []
+            start = cursor if cursor == "-" else f"({cursor}"
+            chunk = self._redis.xrange(topic, start, "+", count=max(limit * 2, 100)) or []
             if not chunk:
                 break
             for entry_id, data in chunk:
