@@ -24,6 +24,7 @@ class MCPToolGateway:
         self._clients: list[MCPClient] = []
         self._contexts: list[object] = []
         self._client_started: bool = False
+        self._tool_cache: list[ToolInfo] | None = None
 
     # Lifecycle
     def start(self) -> None:
@@ -31,13 +32,14 @@ class MCPToolGateway:
             return
         for cfg in self._configs:
             cmd = [cfg.command, *cfg.args]
-            # Treat empty env as None to inherit parent env for process viability
-            env = cfg.env or None
+            # Do NOT inherit parent env: provide a minimal safe default if not set
+            env = cfg.env if cfg.env else {"PATH": "/usr/bin:/bin:/usr/local/bin", "LC_ALL": "C"}
             ctx = spawn_stdio_server(cmd, cwd=cfg.cwd, env=env)
             # Enter the context to get a live client; store the client and its exit stack
             client = ctx.__enter__()
             try:
-                client.initialize()
+                timeout = cfg.init_timeout_seconds if cfg.init_timeout_seconds is not None else 5.0
+                client.initialize(timeout=timeout)
             except Exception:
                 # Ensure proper cleanup on failure to initialize
                 try:
@@ -50,6 +52,7 @@ class MCPToolGateway:
         # Build tool index now so list/call are efficient
         self._index_tools()
         self._client_started = True
+        self._tool_cache = None
 
     def _index_tools(self) -> None:
         self._tool_owner.clear()
@@ -57,6 +60,7 @@ class MCPToolGateway:
             for name in self._iter_server_tool_names(client):
                 if self._is_exposed_by_policy(config, name) and name not in self._tool_owner:
                     self._tool_owner[name] = index
+        self._tool_cache = None
 
     def _iter_server_tool_names(self, client: MCPClient) -> list[str]:
         try:
@@ -81,12 +85,14 @@ class MCPToolGateway:
         return True
 
     def list_tools(self) -> list[ToolInfo]:
+        if self._tool_cache is not None:
+            return list(self._tool_cache)
         result: list[ToolInfo] = []
         for name, idx in self._tool_owner.items():
             client = self._clients[idx]
             # Find the tool metadata from the server
             try:
-                tools = client.list_tools()
+                tools = client.list_tools(timeout=3.0)
             except Exception:
                 # If listing fails now, skip this tool
                 continue
@@ -100,9 +106,14 @@ class MCPToolGateway:
                 if not isinstance(input_schema, dict):
                     input_schema = {}
                 result.append(
-                    ToolInfo(name=name, description=description, input_schema=input_schema)
+                    ToolInfo(
+                        name=name,
+                        description=description,
+                        input_schema=input_schema,
+                    )
                 )
                 break
+        self._tool_cache = list(result)
         return result
 
     def call(
@@ -117,7 +128,6 @@ class MCPToolGateway:
         return client.call_tool(name, arguments, timeout=timeout)
 
     def close(self) -> None:
-        # Idempotent close
         # Close via stored context managers to ensure cleanup in correct order
         for ctx in reversed(self._contexts):
             try:
@@ -129,6 +139,7 @@ class MCPToolGateway:
         self._contexts.clear()
         self._tool_owner.clear()
         self._client_started = False
+        self._tool_cache = None
 
 
 __all__ = ["ToolInfo", "MCPToolGateway"]

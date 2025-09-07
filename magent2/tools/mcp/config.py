@@ -14,6 +14,7 @@ class MCPServerConfig:
     env: dict[str, str]
     allow: set[str] | None
     block: set[str] | None
+    init_timeout_seconds: float | None = None
 
 
 def _parse_csv(value: str | None) -> list[str]:
@@ -68,6 +69,15 @@ def load_agent_mcp_configs(agent_name: str) -> list[MCPServerConfig]:
         env = _parse_env_json(os.getenv(f"{base}ENV_JSON"))
         allow = _parse_csv_set(os.getenv(f"{base}ALLOW"))
         block = _parse_csv_set(os.getenv(f"{base}BLOCK"))
+        init_timeout_raw = os.getenv(f"{base}INIT_TIMEOUT_SECONDS")
+        init_timeout: float | None
+        if init_timeout_raw is None or init_timeout_raw.strip() == "":
+            init_timeout = None
+        else:
+            try:
+                init_timeout = float(init_timeout_raw)
+            except Exception as exc:  # pragma: no cover - defensive
+                raise ValueError("INIT_TIMEOUT_SECONDS must be a float") from exc
 
         configs.append(
             MCPServerConfig(
@@ -77,6 +87,7 @@ def load_agent_mcp_configs(agent_name: str) -> list[MCPServerConfig]:
                 env=env,
                 allow=allow,
                 block=block,
+                init_timeout_seconds=init_timeout,
             )
         )
         index += 1

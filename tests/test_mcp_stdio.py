@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 import pytest
 
 
@@ -184,12 +185,32 @@ def main() -> int:
                 code = arguments.get('code', '')
                 write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'result': {'secret': code}})
             else:
-                write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'error': {'code': -32601, 'message': 'Unknown tool'}})
+                write_frame(
+                    out,
+                    {
+                        'jsonrpc': '2.0',
+                        'id': mid,
+                        'error': {
+                            'code': -32601,
+                            'message': 'Unknown tool',
+                        },
+                    },
+                )
         elif method == 'shutdown':
             write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'result': {'ok': True}})
             return 0
         else:
-            write_frame(out, {'jsonrpc': '2.0', 'id': mid, 'error': {'code': -32601, 'message': 'Method not found'}})
+            write_frame(
+                out,
+                {
+                    'jsonrpc': '2.0',
+                    'id': mid,
+                    'error': {
+                        'code': -32601,
+                        'message': 'Method not found',
+                    },
+                },
+            )
 
 if __name__ == '__main__':
     raise SystemExit(main())
@@ -225,8 +246,8 @@ def test_gateway_with_echo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_ARGS", f"-u,{server_script}")
     monkeypatch.setenv("AGENT_DevAgent_MCP_0_ALLOW", "echo")
 
-    from magent2.tools.mcp.registry import load_for_agent
     from magent2.tools.mcp.config import load_agent_mcp_configs
+    from magent2.tools.mcp.registry import load_for_agent
 
     cfgs = load_agent_mcp_configs("DevAgent")
     assert len(cfgs) == 1
@@ -234,10 +255,7 @@ def test_gateway_with_echo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     gateway = load_for_agent("DevAgent")
     assert gateway is not None
     try:
-        # Sanity: underlying client should see the echo tool
-        client_tools = gateway._clients[0].list_tools()  # type: ignore[attr-defined]
-        client_names = {t["name"] for t in client_tools}
-        assert "echo" in client_names
+        # Sanity: list_tools should expose echo tool
         tools = gateway.list_tools()
         names = {t.name for t in tools}
         assert names == {"echo"}
@@ -277,6 +295,10 @@ def test_gateway_lists_and_calls_filtered_tools(
         tools = gateway.list_tools()
         names = {t.name for t in tools}
         assert names == {"echo"}
+        # Call list again to exercise caching path
+        tools2 = gateway.list_tools()
+        names2 = {t.name for t in tools2}
+        assert names2 == names
         result = gateway.call("echo", {"text": "hi"})
         assert result["content"] == "hi"
         # Ensure blocked/absent tool is not callable
