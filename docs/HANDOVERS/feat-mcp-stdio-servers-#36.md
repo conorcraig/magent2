@@ -33,6 +33,7 @@ Introduce a configuration loader that resolves MCP servers for a given agent fro
 - `AGENT_<AgentName>_MCP_<N>_BLOCK` (comma-separated blocklist of tool names)
 
 Policy:
+
 - Default-deny unless allowlist is present (recommended). If both allow and block set, exposure = allow − block.
 - Only pass the explicit `env` provided; do not inherit parent environment by default.
 
@@ -86,6 +87,7 @@ Implementation: `magent2/tools/mcp/registry.py`
 ### 4) Exports
 
 Update `magent2/tools/mcp/__init__.py` to export:
+
 - `MCPServerConfig`, `load_agent_mcp_configs`
 - `ToolInfo`, `MCPToolGateway`
 - `load_for_agent`
@@ -100,20 +102,24 @@ Update `magent2/tools/mcp/__init__.py` to export:
 
 Augment `tests/test_mcp_stdio.py` with gateway tests:
 
-1) `test_gateway_lists_and_calls_filtered_tools`
+1. `test_gateway_lists_and_calls_filtered_tools`
+
 - Temp server advertises `echo` and `secret` tools.
 - Allowlist only `echo`; assert `list_tools()` exposes only `echo` and `call('echo', {text:'hi'})` returns `hi`.
 
-2) `test_gateway_cleanup_idempotent`
+1. `test_gateway_cleanup_idempotent`
+
 - Create gateway, start, `close()`, `close()` again; no exception.
 
 Optional demo server test (graceful skip):
 
 Create `tests/test_mcp_demo_optional.py`:
+
 - Probe availability (e.g., check `shutil.which("npx")`, then attempt to spawn `npx -y @modelcontextprotocol/server-memory --stdio`); on failure/timeout → `pytest.skip("demo MCP server unavailable")`.
 - If available: `initialize`, `tools/list` smoke, then `close`.
 
 Probe example:
+
 ```python
 import shutil, subprocess, pytest
 
@@ -136,6 +142,7 @@ Agent `DevAgent`:
 - `AGENT_DevAgent_MCP_0_ALLOW=echo,search`  (adjust to real tool names)
 
 Filesystem variant:
+
 - `AGENT_DevAgent_MCP_1_CMD=npx`
 - `AGENT_DevAgent_MCP_1_ARGS=-y,@modelcontextprotocol/server-filesystem,--stdio,/path/to/dir`
 - `AGENT_DevAgent_MCP_1_ALLOW=list,read`
