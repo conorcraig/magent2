@@ -10,7 +10,7 @@ from .models import Task
 from .redis_store import RedisTodoStore
 
 # Module-level store cache to avoid repeated reconnects
-STORE: RedisTodoStore | None = None
+_STORE: RedisTodoStore | None = None
 
 
 def _serialize_task(task: Task) -> dict[str, Any]:
@@ -27,12 +27,20 @@ def _require_str_non_empty(name: str, value: str) -> str:
 
 
 def _get_store() -> RedisTodoStore:
-    global STORE
-    if STORE is None:
+    global _STORE
+    if _STORE is None:
         url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         prefix = os.getenv("TODO_STORE_PREFIX", "todo")
-        STORE = RedisTodoStore(url=url, key_prefix=prefix)
-    return STORE
+        _STORE = RedisTodoStore(url=url, key_prefix=prefix)
+    return _STORE
+
+
+def _require_metadata_dict(name: str, value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a dict")
+    return value
 
 
 @function_tool
@@ -42,10 +50,9 @@ def todo_create(
     """Create a todo task."""
     cid = _require_str_non_empty("conversation_id", conversation_id)
     ttl = _require_str_non_empty("title", title)
-    if metadata is not None and not isinstance(metadata, dict):
-        raise ValueError("metadata must be a dict")
+    md = _require_metadata_dict("metadata", metadata)
     try:
-        t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=metadata or {})
+        t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=md or {})
         return {"task": _serialize_task(t)}
     except redis.exceptions.RedisError as e:
         return {"task": None, "error": str(e), "transient": True}
@@ -85,12 +92,11 @@ def todo_update(
     tid = _require_str_non_empty("task_id", task_id)
     if title is not None and not isinstance(title, str):
         raise ValueError("title must be a string if provided")
-    if metadata is not None and not isinstance(metadata, dict):
-        raise ValueError("metadata must be a dict")
     if title is None and completed is None and metadata is None:
         raise ValueError("no fields to update")
+    md = _require_metadata_dict("metadata", metadata)
     try:
-        t = _get_store().update_task(tid, title=title, completed=completed, metadata=metadata)
+        t = _get_store().update_task(tid, title=title, completed=completed, metadata=md)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
     except redis.exceptions.RedisError as e:
         return {"task": None, "error": str(e), "transient": True}
