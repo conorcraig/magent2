@@ -12,45 +12,32 @@ help:
 	@just --list
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Quality gates
+# One-shot entrypoints
 # ──────────────────────────────────────────────────────────────────────────────
-lint:
-	uv run ruff format --check .
-	uv run ruff check .
-
-typecheck:
+check:
+	# Full local quality gate: lint, types, complexity, secrets, tests
+	# Whitespace/EOL auto-fixes across the repo
+	uv run --isolated pre-commit run end-of-file-fixer --all-files || true
+	uv run --isolated pre-commit run trailing-whitespace --all-files || true
+	uv run --isolated ruff format .
+	uv run --isolated ruff check --fix .
+	# Markdown auto-fix (uses local Node via npx)
+	npx --yes markdownlint-cli2 --fix || true
 	bash .github/scripts/ci/type_check.sh
+	bash .github/scripts/ci/complexity_check.sh
+	# Validate secrets against baseline using pre-commit hook across tracked files (excluding baselines)
+	bash -c 'FILES=$(git ls-files | grep -v "^\\.baseline-"); uv run --isolated python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES'
+	uv run --isolated pytest -q
 
-complexitycheck +args:
-	bash .github/scripts/ci/complexity_check.sh {{args}}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Baselines
-# ──────────────────────────────────────────────────────────────────────────────
-update-type-baseline:
+update:
+	# Update all baselines in one go
 	bash .github/scripts/ci/update_type_baseline.sh
-
-update-complexity-baseline:
 	bash .github/scripts/ci/update_complexity_baseline.sh
+	uv run --isolated detect-secrets scan --exclude-files '^\\.baseline-.*$' > .baseline-secrets
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Secrets
-# ──────────────────────────────────────────────────────────────────────────────
-secrets-scan:
-	uv run detect-secrets scan | diff -u .baseline-secrets -
-
-secrets-baseline:
-	uv run detect-secrets scan > .baseline-secrets
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Tests
-# ──────────────────────────────────────────────────────────────────────────────
 test:
-	uv run pytest -q
+	uv run --isolated pytest -q
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Docker convenience
-# ──────────────────────────────────────────────────────────────────────────────
 up +args:
 	docker compose up -d {{args}}
 

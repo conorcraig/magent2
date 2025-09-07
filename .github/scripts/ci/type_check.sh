@@ -21,15 +21,20 @@ echo "[type_check] Running mypy and enforcing baseline ratchet..."
 
 # Capture full mypy output for logs
 set +e
-MYPY_OUTPUT="$(uv run mypy . 2>&1)"
+MYPY_OUTPUT="$(uv run --isolated mypy . 2>&1)"
 MYPY_STATUS=$?
 set -e
 
 printf "%s\n" "${MYPY_OUTPUT}" > reports/mypy-full.txt
 
-# Pipe through mypy-baseline filter to allow only regressions through (and fail on improvements)
-printf "%s\n" "${MYPY_OUTPUT}" | uv run mypy-baseline filter --baseline-path "${BASELINE_PATH}" --sort-baseline
-FILTER_STATUS=$?
+# Pipe through mypy-baseline filter. Locally, ignore purely "fixed" diffs so progress stays green.
+if [[ -z "${CI-}" ]]; then
+  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --allow-unsynced --baseline-path "${BASELINE_PATH}" --sort-baseline
+  FILTER_STATUS=$?
+else
+  printf "%s\n" "${MYPY_OUTPUT}" | uv run --isolated mypy-baseline filter --baseline-path "${BASELINE_PATH}" --sort-baseline
+  FILTER_STATUS=$?
+fi
 
 if [[ ${FILTER_STATUS} -ne 0 ]]; then
   echo "[type_check] mypy-baseline detected baseline drift (regression or improvement)."

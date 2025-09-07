@@ -19,7 +19,7 @@ THRESHOLD_MODS="A"
 THRESHOLD_ABS="B"
 
 run_xenon() {
-  uv run xenon \
+  uv run --isolated xenon \
     --max-average "${THRESHOLD_AVG}" \
     --max-modules "${THRESHOLD_MODS}" \
     --max-absolute "${THRESHOLD_ABS}" \
@@ -42,13 +42,16 @@ set -e
 
 printf "%s\n" "${XENON_OUTPUT}" > reports/xenon-full.txt
 
-# Save only error lines for baseline comparison (xenon prints errors with 'ERROR:xenon:')
-{ printf "%s\n" "${XENON_OUTPUT}" | grep -E '^ERROR:xenon:' || true; } > reports/xenon-errors.txt
+# Normalize errors for stable diffs: keep xenon error lines, strip ":<line> ", sort
+{ printf "%s\n" "${XENON_OUTPUT}" | grep -E '^ERROR:xenon:' || true; } \
+  | sed -E 's/:([0-9]+) /:/' \
+  | sort \
+  > reports/xenon-errors.txt
 
 [[ -f "${BASELINE_PATH}" ]] || touch "${BASELINE_PATH}"
 
 # If there are any new errors beyond the baseline, fail. If baseline lines disappeared (improvement), also fail to force baseline update.
-NEW_DIFF=$(diff -u "${BASELINE_PATH}" reports/xenon-errors.txt || true)
+NEW_DIFF=$(diff -u <(sed -E 's/:([0-9]+) /:/' "${BASELINE_PATH}" | sort) reports/xenon-errors.txt || true)
 if [[ -n "${NEW_DIFF}" ]]; then
   echo "[complexity_check] Complexity baseline drift detected. Review diff and update baseline if expected:"
   echo "${NEW_DIFF}"
