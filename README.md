@@ -132,7 +132,22 @@ Environment variables:
 
 - `REDIS_URL` (default `redis://localhost:6379/0` or compose service URL)
 - `AGENT_NAME` (worker target agent; default `DevAgent`)
-- `OPENAI_API_KEY` (required if using real Agents SDK models/tools)
+- `AGENT_MODEL` (Agents SDK model name, e.g., `gpt-4o-mini`; default `gpt-4o-mini`)
+- `AGENT_INSTRUCTIONS` (inline agent instructions; optional)
+- `AGENT_INSTRUCTIONS_FILE` (path to a file with agent instructions; overrides `AGENT_INSTRUCTIONS`)
+- `AGENT_TOOLS` (comma-separated tool names; currently unused/no-op, reserved for follow-ups)
+- `OPENAI_API_KEY` (if set, the Worker uses the OpenAI Agents SDK runner; if unset, it falls back to EchoRunner for local/dev)
+
+At startup, the Worker selects the runner based on `OPENAI_API_KEY` and logs the choice (Echo vs OpenAI) with the agent name/model.
+
+### Terminal tool (policy via env)
+
+- `TERMINAL_ALLOWED_COMMANDS`: comma‑separated list of allowed command basenames (e.g., `echo,bash,python3`). Default: empty (deny by default).
+- `TERMINAL_TIMEOUT_SECONDS`: float seconds before forceful termination. Default: `5.0`.
+- `TERMINAL_OUTPUT_CAP_BYTES`: byte cap for combined stdout/stderr enforced by the low‑level tool. Default: `8192`.
+- `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS`: character cap for the concise string returned to the model. Default: `1000`.
+- `TERMINAL_REDACT_SUBSTRINGS`: comma‑separated substrings to redact in outputs.
+- `TERMINAL_REDACT_PATTERNS`: comma‑separated regex patterns to redact in outputs (built‑ins always applied: `sk-[A-Za-z0-9_-]{10,}` and common sensitive labels).
 
 ## Contracts
 
