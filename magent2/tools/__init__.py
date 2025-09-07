@@ -1,3 +1,5 @@
-from __future__ import annotations
+"""Tool packages for magent2 (terminal, todo, mcp)."""
 
-__all__: list[str] = []
+from typing import Final
+
+__all__: Final[list[str]] = []

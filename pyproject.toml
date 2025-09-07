@@ -5,9 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi==0.115.5",
+    "httpx==0.27.2",
     "openai-agents>=0.2.11",
     "python-dotenv>=1.1.1",
     "redis>=6.4.0",
+    "uvicorn==0.32.1",
 ]
 
 [tool.ruff]
@@ -44,6 +47,7 @@ python_files = ["test_*.py"]
 [dependency-groups]
 dev = [
     "mypy>=1.17.1",
+    "mypy-baseline>=0.7.3",
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.1.0",
@@ -51,4 +55,5 @@ dev = [
     "pytest-randomly>=3.16.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.12.12",
+    "xenon>=0.9.3",
 ]
