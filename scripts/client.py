@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -136,9 +137,36 @@ def _default_sender() -> str:
     return f"user:{user}"
 
 
+def _discover_base_url(fallback: str = "http://localhost:8000") -> str:
+    """Discover gateway base URL via `docker compose port gateway 8000`.
+
+    Returns fallback on any failure.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "port", "gateway", "8000"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        line = (proc.stdout or "").strip().splitlines()[0] if proc.stdout else ""
+        if ":" in line:
+            host, _, port = line.rpartition(":")
+            port = port.strip()
+            if port.isdigit():
+                return f"http://localhost:{port}"
+    except Exception:
+        pass
+    return fallback
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser("magent2 client")
-    p.add_argument("--base-url", default=os.getenv("MAGENT2_BASE_URL", "http://localhost:8000"))
+    p.add_argument(
+        "--base-url",
+        default=os.getenv("MAGENT2_BASE_URL", "auto"),
+        help="Gateway base URL (e.g., http://localhost:8000). Use 'auto' to discover compose port.",
+    )
     p.add_argument("--conv", default=f"conv-{str(uuid.uuid4())[:8]}")
     p.add_argument("--agent", default=os.getenv("AGENT_NAME", "DevAgent"))
     p.add_argument("--sender", default=_default_sender())
@@ -189,8 +217,11 @@ def repl(cfg: ClientConfig) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    base_url = str(args.base_url)
+    if base_url.lower() == "auto":
+        base_url = _discover_base_url()
     cfg = ClientConfig(
-        base_url=str(args.base_url),
+        base_url=base_url,
         conversation_id=str(args.conv),
         agent_name=str(args.agent),
         sender=str(args.sender),
