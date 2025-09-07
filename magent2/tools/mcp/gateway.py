@@ -124,7 +124,7 @@ class MCPToolGateway:
         idx = self._tool_owner[name]
         client = self._clients[idx]
         if timeout is None:
-            return client.call_tool(name, arguments)
+            return client.call_tool(name, arguments, timeout=10.0)
         return client.call_tool(name, arguments, timeout=timeout)
 
     def close(self) -> None:
