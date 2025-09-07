@@ -1,4 +1,4 @@
-# Handover: Expose Todo tool as Agents SDK function tools (Issue #35)
+# Handover: Expose Todo function tools (#35)
 
 ## Context
 

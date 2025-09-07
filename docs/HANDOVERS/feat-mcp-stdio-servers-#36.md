@@ -1,4 +1,4 @@
-# Handover — MCP stdio servers for agents (Issue #36)
+# Handover: MCP stdio servers (#36)
 
 - Branch name: `feat/mcp-stdio-servers-#36`
 - Scope: Connect per-agent configured MCP stdio servers and expose a safe subset of discovered tools to the agent runtime. Include graceful timeouts/cleanup and tests, skipping external demo server tests if unavailable.
@@ -102,14 +102,12 @@ Update `magent2/tools/mcp/__init__.py` to export:
 
 Augment `tests/test_mcp_stdio.py` with gateway tests:
 
-1. `test_gateway_lists_and_calls_filtered_tools`
+1) Gateway lists and calls filtered tools
+  - Temp server advertises `echo` and `secret` tools.
+  - Allowlist only `echo`; assert `list_tools()` exposes only `echo` and `call('echo', {text:'hi'})` returns `hi`.
 
-- Temp server advertises `echo` and `secret` tools.
-- Allowlist only `echo`; assert `list_tools()` exposes only `echo` and `call('echo', {text:'hi'})` returns `hi`.
-
-1. `test_gateway_cleanup_idempotent`
-
-- Create gateway, start, `close()`, `close()` again; no exception.
+2) Gateway cleanup idempotent
+  - Create gateway, start, `close()`, `close()` again; no exception.
 
 Optional demo server test (graceful skip):
 

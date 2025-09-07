@@ -218,14 +218,13 @@ Notes:
 ## Tests (TDD additions)
 
 - Add `tests/test_terminal_function_tools.py` covering:
-  - Disallowed command raises/blocks via wrapper (`TERMINAL_ALLOWED_COMMANDS` unset or missing entry).
-  - Timeout respected: set `TERMINAL_TIMEOUT_SECONDS=0.5` and run a sleep command via `bash -lc 'sleep 5'`.
-  - Truncation: set small `TERMINAL_OUTPUT_CAP_BYTES` and verify `summary_output` length ≤ `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS` and byte-cap is enforced by `TerminalTool`.
-  - Redaction: set `TERMINAL_REDACT_SUBSTRINGS` to include a marker printed by the command; ensure `[REDACTED]` appears and the raw token does not. Also verify built-in `sk-...` pattern masking.
-  - Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
+  1. Disallowed command raises/blocks via wrapper (`TERMINAL_ALLOWED_COMMANDS` unset or missing entry).
+  2. Timeout respected: set `TERMINAL_TIMEOUT_SECONDS=0.5` and run a sleep command via `bash -lc 'sleep 5'`.
+  3. Truncation: set small `TERMINAL_OUTPUT_CAP_BYTES` and verify `summary_output` length ≤ `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS` and byte-cap is enforced by `TerminalTool`.
+  4. Redaction: set `TERMINAL_REDACT_SUBSTRINGS` to include a marker printed by the command; ensure `[REDACTED]` appears and the raw token does not. Also verify built-in `sk-...` pattern masking.
+  5. Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
 
-Testing notes:
-
+### Testing notes
 - Reuse `tmp_path` and pattern from `tests/test_terminal_tool.py` where helpful.
 - Use `monkeypatch.setenv` to configure env per test to avoid cross-test contamination.
 
@@ -253,7 +252,7 @@ Testing notes:
 
 ## Next steps for you
 
-1) Implement `function_tools.py` and tests per the sketch; keep contracts untouched.
-2) Verify SDK decorator import path and decorate `terminal_run` accordingly.
-3) Export from `magent2/tools/terminal/__init__.py` and wire into the SDK Agent in the runner once #33 is in place.
-4) Validate with `just check`.
+1. Implement `function_tools.py` and tests per the sketch; keep contracts untouched.
+2. Verify SDK decorator import path and decorate `terminal_run` accordingly.
+3. Export from `magent2/tools/terminal/__init__.py` and wire into the SDK Agent in the runner once #33 is in place.
+4. Validate with `just check`.

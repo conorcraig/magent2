@@ -23,3 +23,6 @@ htmlcov/
 # test artifacts
 reports/
 .mypy.out
+
+# pr_diffs
+pr_diffs/
