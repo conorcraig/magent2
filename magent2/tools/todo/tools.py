@@ -9,6 +9,9 @@ from agents import function_tool
 from .models import Task
 from .redis_store import RedisTodoStore
 
+# Module-level store cache to avoid repeated reconnects
+STORE: RedisTodoStore | None = None
+
 
 def _serialize_task(task: Task) -> dict[str, Any]:
     return task.model_dump(mode="json")
@@ -24,16 +27,23 @@ def _require_str_non_empty(name: str, value: str) -> str:
 
 
 def _get_store() -> RedisTodoStore:
-    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    prefix = os.getenv("TODO_STORE_PREFIX", "todo")
-    return RedisTodoStore(url=url, key_prefix=prefix)
+    global STORE
+    if STORE is None:
+        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        prefix = os.getenv("TODO_STORE_PREFIX", "todo")
+        STORE = RedisTodoStore(url=url, key_prefix=prefix)
+    return STORE
 
 
-def _create_task_tool(
+@function_tool
+def todo_create(
     conversation_id: str, title: str, metadata: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    """Create a todo task."""
     cid = _require_str_non_empty("conversation_id", conversation_id)
     ttl = _require_str_non_empty("title", title)
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("metadata must be a dict")
     try:
         t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=metadata or {})
         return {"task": _serialize_task(t)}
@@ -41,7 +51,9 @@ def _create_task_tool(
         return {"task": None, "error": str(e), "transient": True}
 
 
-def _get_task_tool(task_id: str) -> dict[str, Any]:
+@function_tool
+def todo_get(task_id: str) -> dict[str, Any]:
+    """Get a todo task by id."""
     tid = _require_str_non_empty("task_id", task_id)
     try:
         t = _get_store().get_task(tid)
@@ -50,7 +62,9 @@ def _get_task_tool(task_id: str) -> dict[str, Any]:
         return {"task": None, "error": str(e), "transient": True}
 
 
-def _list_tasks_tool(conversation_id: str) -> dict[str, Any]:
+@function_tool
+def todo_list(conversation_id: str) -> dict[str, Any]:
+    """List todo tasks for a conversation."""
     cid = _require_str_non_empty("conversation_id", conversation_id)
     try:
         tasks = _get_store().list_tasks(cid)
@@ -59,16 +73,22 @@ def _list_tasks_tool(conversation_id: str) -> dict[str, Any]:
         return {"tasks": [], "error": str(e), "transient": True}
 
 
-def _update_task_tool(
+@function_tool
+def todo_update(
     task_id: str,
     *,
     title: str | None = None,
     completed: bool | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Update a todo task by id."""
     tid = _require_str_non_empty("task_id", task_id)
     if title is not None and not isinstance(title, str):
         raise ValueError("title must be a string if provided")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("metadata must be a dict")
+    if title is None and completed is None and metadata is None:
+        raise ValueError("no fields to update")
     try:
         t = _get_store().update_task(tid, title=title, completed=completed, metadata=metadata)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
@@ -76,7 +96,9 @@ def _update_task_tool(
         return {"task": None, "error": str(e), "transient": True}
 
 
-def _delete_task_tool(task_id: str) -> dict[str, Any]:
+@function_tool
+def todo_delete(task_id: str) -> dict[str, Any]:
+    """Delete a todo task by id."""
     tid = _require_str_non_empty("task_id", task_id)
     try:
         ok = _get_store().delete_task(tid)
@@ -117,41 +139,11 @@ class _DeleteTaskTool(Protocol):
     def __call__(self, task_id: str) -> dict[str, Any]: ...
 
 
-create_task_tool = cast(
-    _CreateTaskTool,
-    function_tool(name_override="todo_create", description_override="Create a todo task")(
-        _create_task_tool
-    ),
-)
-
-get_task_tool = cast(
-    _GetTaskTool,
-    function_tool(name_override="todo_get", description_override="Get a todo task by id")( 
-        _get_task_tool
-    ),
-)
-
-list_tasks_tool = cast(
-    _ListTasksTool,
-    function_tool(
-        name_override="todo_list",
-        description_override="List todo tasks for a conversation",
-    )(_list_tasks_tool),
-)
-
-update_task_tool = cast(
-    _UpdateTaskTool,
-    function_tool(name_override="todo_update", description_override="Update a todo task by id")(
-        _update_task_tool
-    ),
-)
-
-delete_task_tool = cast(
-    _DeleteTaskTool,
-    function_tool(name_override="todo_delete", description_override="Delete a todo task by id")(
-        _delete_task_tool
-    ),
-)
+create_task_tool = cast(_CreateTaskTool, todo_create)
+get_task_tool = cast(_GetTaskTool, todo_get)
+list_tasks_tool = cast(_ListTasksTool, todo_list)
+update_task_tool = cast(_UpdateTaskTool, todo_update)
+delete_task_tool = cast(_DeleteTaskTool, todo_delete)
 
 __all__ = ["create_task_tool", "get_task_tool", "list_tasks_tool", "update_task_tool", "delete_task_tool"]
 

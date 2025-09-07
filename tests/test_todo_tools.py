@@ -99,3 +99,38 @@ def test_json_safety_created_at_is_str(tool_env: dict[str, str]) -> None:
     res = create_task_tool("conv4", "Check json")
     assert isinstance(res["task"]["created_at"], str)
 
+
+def test_update_no_fields_raises(tool_env: dict[str, str]) -> None:
+    from magent2.tools.todo.tools import create_task_tool, update_task_tool
+
+    created = create_task_tool("conv5", "Title")
+    tid = created["task"]["id"]
+    with pytest.raises(ValueError) as ei:
+        update_task_tool(tid)
+    assert "no fields to update" in str(ei.value)
+
+
+def test_metadata_must_be_dict(tool_env: dict[str, str]) -> None:
+    from magent2.tools.todo.tools import create_task_tool, update_task_tool
+
+    with pytest.raises(ValueError):
+        create_task_tool("conv6", "Title", metadata=[1, 2])  # type: ignore[arg-type]
+
+    created = create_task_tool("conv6", "Title2")
+    tid = created["task"]["id"]
+    with pytest.raises(ValueError):
+        update_task_tool(tid, metadata=["x"])  # type: ignore[arg-type]
+
+
+def test_transient_error_on_create(monkeypatch: pytest.MonkeyPatch, tool_env: dict[str, str]) -> None:
+    import redis as _redis
+    from magent2.tools.todo import tools as todo_tools
+
+    def _boom(*args: object, **kwargs: object):
+        raise _redis.exceptions.RedisError("boom")
+
+    monkeypatch.setattr(todo_tools, "_get_store", lambda: type("X", (), {"create_task": _boom})())
+    res = todo_tools.create_task_tool("conv7", "Title")
+    assert res["task"] is None
+    assert res.get("transient") is True
+
