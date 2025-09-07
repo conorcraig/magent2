@@ -1,6 +1,6 @@
-## Handover: Chat tool as Agents SDK function tool for Bus (#37)
+# Handover: Chat tool as Agents SDK function tool for Bus (#37)
 
-### Context
+## Context
 
 - Goal: Build a function tool that publishes addressed `MessageEnvelope` to the Bus for inter-agent messaging.
 - Scope: Add a chat tool under `magent2/tools/chat/` and tests under `tests/`. Do not change frozen contracts.
@@ -10,13 +10,13 @@
 - Topic conventions (v1): inbound `chat:{conversation_id}` or `chat:{agent_name}`, stream `stream:{conversation_id}`.
 - References: see `docs/CONTRACTS.md` and offline OpenAI Agents SDK cheatsheet in `docs/refs/openai-agents-sdk.md`.
 
-### Deliverables
+## Deliverables
 
 - An Agents SDK function tool named `chat_send` that accepts `recipient` and `content`, validates addressing, constructs a canonical `MessageEnvelope`, and publishes to the correct Bus topic(s).
 - Tests using an `InMemoryBus` test double (pattern from `tests/test_bus_interface.py`) to validate publish behavior and payload shape.
 - No changes to frozen v1 contracts; only new files under `magent2/tools/chat/` and new tests.
 
-### Requirements and behavior
+## Requirements and behavior
 
 - Inputs (tool surface):
   - `recipient: str` — one of:
@@ -34,7 +34,7 @@
   - If `recipient` starts with `agent:`, additionally publish to agent topic: `chat:{AgentName}`.
   - Return a small dict: `{ "ok": true, "envelope_id": str, "published_to": [topics...] }`.
 
-### Conversation and sender resolution
+## Conversation and sender resolution
 
 - `conversation_id`:
   - If `recipient` starts with `chat:` → derive `conversation_id` from recipient suffix.
@@ -42,14 +42,14 @@
 - `sender`:
   - Prefer `sender = f"agent:{AGENT_NAME}"` with `AGENT_NAME` read from environment (already used by `worker` and `compose`). Fallback to `agent:unknown` if unset (or consider raising for stricter policy).
 
-### Bus access and testability
+## Bus access and testability
 
 - Provide a module-level `get_bus()` that returns a `Bus`:
   - Default: instantiate `RedisBus` using `REDIS_URL` (matches README/compose), imported lazily to avoid import cost if unused.
   - Tests: expose `set_bus_for_testing(bus: Bus)` to inject an `InMemoryBus` (pattern used across tests).
 - Wrap published payload with `BusMessage(topic=..., payload=<envelope_json>)`.
 
-### File layout (new)
+## File layout (new)
 
 - `magent2/tools/chat/__init__.py` — export `chat_send` (decorated) and `send_message` (undecorated helper for unit tests).
 - `magent2/tools/chat/function_tools.py` — implementation:
@@ -61,7 +61,7 @@
   - Decorated tool `chat_send(recipient: str, content: str) -> dict` that calls `send_message(...)` and returns its dict
   - Bus injection helpers: `_get_bus()`, `set_bus_for_testing(...)`
 
-### SDK usage (offline)
+## SDK usage (offline)
 
 - The function tool decorator is available via the Agents SDK as shown in `docs/refs/openai-agents-sdk.md`:
 
@@ -85,10 +85,11 @@ def chat_send(recipient: str, content: str) -> dict:
 ```
 
 Notes:
+
 - If your installed SDK version differs, confirm the import (`from agents import function_tool`) in `docs/refs/openai-agents-sdk.md`.
 - If a tool/run context is available (e.g., `tool_context` or `run_context`), pass it through to `send_message(..., context=...)` so it can derive `conversation_id` when `recipient` is `agent:*`.
 
-### Tests (TDD)
+## Tests (TDD)
 
 - Add `tests/test_chat_function_tool.py`:
   - Define `InMemoryBus` (copy pattern from `tests/test_bus_interface.py`).
@@ -99,7 +100,7 @@ Notes:
   - Case: empty/blank content raises `ValueError`.
 - Keep tests deterministic; avoid Redis/network; no Agents SDK import is needed for unit tests (test undecorated `send_message`).
 
-### Implementation sketch (pure helper)
+## Implementation sketch (pure helper)
 
 ```python
 from __future__ import annotations
@@ -181,18 +182,18 @@ def send_message(recipient: str, content: str, *, context: dict[str, Any] | None
     return {"ok": True, "envelope_id": env.id, "published_to": topics}
 ```
 
-### Risks and mitigations
+## Risks and mitigations
 
 - SDK context API differences: keep the undecorated `send_message` independent of SDK; the decorated `chat_send` can optionally fetch context and pass it in.
 - Addressing drift: centralize validation in one place; raise clear errors.
 - Redis dependency: default to `RedisBus` only outside tests; provide injection hook for tests.
 
-### Validation
+## Validation
 
 - Run locally: `just check` (format, lint, types, complexity, secrets, tests).
 - Ensure tests pass on CI; do not run Redis in these unit tests (use `InMemoryBus`).
 
-### Next steps for implementer
+## Next steps for implementer
 
 1) Create `magent2/tools/chat/function_tools.py` and `__init__.py` per layout above.
 2) Add `tests/test_chat_function_tool.py` with fixtures and cases.
