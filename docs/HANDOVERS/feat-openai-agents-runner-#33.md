@@ -65,10 +65,73 @@ Owner: next agent picking up Issue #33
 
 ### Implementation notes
 
-- Imports (SDK): per docs examples, the package exposes `Agent`, `Runner`, and streaming event classes from the top-level `agents` module. Validate against `docs/refs/openai-agents-sdk.md` and upstream docs.
+- Imports (SDK): per docs examples, the package exposes `Agent`, `Runner`, and tool decorators from the top-level `agents` module. Token delta events come from `openai.types.responses`.
+  - Required:
+    - `from agents import Agent, Runner`
+    - Optional tool decorator: `from agents import function_tool`
+    - Token delta type for streaming: `from openai.types.responses import ResponseTextDeltaEvent`
 - Do not introduce any changes to v1 contracts. Only add new code and wire-up.
 - Keep runner mapping defensive: accept both typed objects and dict-shaped events; ignore unrecognized event types; log at debug level if needed (logging infra may land later; keep silent or minimal).
 - Keep tool support minimal initially. If no tools are configured, the agent will operate as pure chat.
+
+### SDK usage cheatsheet (no web needed)
+
+Use these snippets with `openai-agents>=0.2.11` (see `pyproject.toml`).
+
+```python
+from agents import Agent, Runner  # core SDK
+from openai.types.responses import ResponseTextDeltaEvent  # token deltas
+
+# 1) Construct an Agent (minimal chat-only)
+agent = Agent(
+    name="DevAgent",
+    instructions="You are a helpful assistant.",
+    # tools=[]  # keep empty for now; add later via function_tool-decorated functions
+)
+
+# 2) Streamed run (async) — yields SDK stream events
+async def run_stream(input_text: str, session=None):
+    rs = Runner.run_streamed(agent, input=input_text, session=session)
+    async for ev in rs.stream_events():
+        # ev.type commonly one of:
+        # - "raw_response_event": carries low-level model events from OpenAI SDK
+        # - "run_item_stream_event": high-level agent steps (tool calls/results, messages)
+        # - "agent_updated_stream_event": agent handoffs/updates
+        if ev.type == "raw_response_event" and isinstance(ev.data, ResponseTextDeltaEvent):
+            text_piece = ev.data.delta  # token chunk (str)
+            # map → TokenEvent(text=text_piece)
+        elif ev.type == "run_item_stream_event":
+            data = ev.data  # may be typed or dict-like; prefer attribute access then keys
+            # Heuristics:
+            # - If it represents a tool invocation, expect fields like name/tool_name and arguments/args
+            #   map → ToolStepEvent(name=..., args=...)
+            # - If it represents a tool result/completion, prefer summarizing into result_summary
+            # - If it represents an assistant/output message, capture text for OutputEvent at the end
+        elif ev.type == "agent_updated_stream_event":
+            # Non-essential for v1 mapping; can be ignored
+            pass
+    # Optionally, rs may expose a way to obtain final output; if unavailable, join accumulated tokens
+    # final_text = await rs.get_final_output()  # if provided by the SDK version
+    # map → OutputEvent(text=final_text)
+```
+
+Notes:
+- If `rs.get_final_output()` (or similar) is unavailable, accumulate token deltas during iteration and emit a single `OutputEvent` at the end with the joined text.
+- If tools are configured, prefer emitting `ToolStepEvent` at invocation time (with args) and another at completion with `result_summary` (short string).
+
+### Event mapping table (SDK → v1)
+
+- **raw_response_event + ResponseTextDeltaEvent(delta: str)** → `TokenEvent(text=delta, index=++)`
+- **run_item_stream_event (tool invocation)** → `ToolStepEvent(name=<tool>, args=<dict>)`
+- **run_item_stream_event (tool result)** → `ToolStepEvent(name=<tool>, result_summary=<short>)`
+- **assistant/output message end (or stream completion)** → `OutputEvent(text=<final_text>, usage=? if available)`
+
+### Session hints (SDK)
+
+- Sessions preserve conversation history. If a concrete `Session` class is available in your installed SDK version, prefer passing it to `Runner.run_streamed(..., session=...)`.
+- Example path for a persistent session (check your installed package):
+  - `from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession`  # if available
+  - Otherwise, keep an in-memory map of session-like objects or pass `None` and rely on stateless runs for now. Our adapter will still maintain per-`conversation_id` state if needed.
 
 ### File changes (planned)
 
@@ -106,7 +169,8 @@ class OpenAIAgentsRunner(Runner):
                 token_index += 1
             if mapped is not None:
                 queue.put(mapped)
-        # finally, enqueue OutputEvent if provided by the stream result API (or when seen)
+        # finally, enqueue OutputEvent either when a final-output event is observed
+        # or by joining accumulated token text at stream end as a fallback
         ...
 
     def _map_event(self, conversation_id: str, ev: Any, token_index: int) -> BaseStreamEvent | None:
