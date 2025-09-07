@@ -1,46 +1,22 @@
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any
 
-import pytest
-
 from magent2.bus.interface import BusMessage
 
-
-def _redis_url() -> str:
-    return os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-
-def _redis_available() -> bool:
-    try:
-        import redis
-
-        r = redis.from_url(_redis_url(), decode_responses=True)
-        try:
-            r.ping()
-            return True
-        except Exception:
-            return False
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _redis_available(), reason="Redis is not available at REDIS_URL"
-)
+pytestmark: list = []
 
 
 def _unique_topic(prefix: str = "chat:test") -> str:
     return f"{prefix}:{uuid.uuid4()}"
 
 
-def test_redis_bus_roundtrip() -> None:
+def test_redis_bus_roundtrip(redis_url: str) -> None:
     from magent2.bus.redis_adapter import RedisBus
 
     topic = _unique_topic()
-    bus = RedisBus(redis_url=_redis_url())
+    bus = RedisBus(redis_url=redis_url)
 
     m1 = BusMessage(topic=topic, payload={"n": 1})
     m2 = BusMessage(topic=topic, payload={"n": 2})
@@ -55,11 +31,11 @@ def test_redis_bus_roundtrip() -> None:
     assert out[0].payload == {"n": 2}
 
 
-def test_redis_bus_tail_read_limit() -> None:
+def test_redis_bus_tail_read_limit(redis_url: str) -> None:
     from magent2.bus.redis_adapter import RedisBus
 
     topic = _unique_topic()
-    bus = RedisBus(redis_url=_redis_url())
+    bus = RedisBus(redis_url=redis_url)
 
     ids: list[str] = []
     for i in range(5):
@@ -88,12 +64,12 @@ def _pending_count_raw(client: Any, topic: str, group: str) -> int:
     return -1
 
 
-def test_redis_bus_consumer_group_ack() -> None:
+def test_redis_bus_consumer_group_ack(redis_url: str) -> None:
     from magent2.bus.redis_adapter import RedisBus
 
     topic = _unique_topic()
     group = f"g-{uuid.uuid4()}"
-    bus = RedisBus(redis_url=_redis_url(), group_name=group, consumer_name="c1")
+    bus = RedisBus(redis_url=redis_url, group_name=group, consumer_name="c1")
 
     mid = bus.publish(topic, BusMessage(topic=topic, payload={"n": 1}))
     assert mid
