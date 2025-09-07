@@ -148,6 +148,10 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
     return f"{status}\noutput:\n{summary_output}"
 ```
 
+Notes:
+
+- The example above shows a plain function; to expose as an Agents SDK function tool, decorate or wrap per the SDK API. Keep the underlying logic separate so tests can target `terminal_run` directly without requiring the SDK import.
+
 ## SDK offline quick reference (OpenAI Agents SDK 0.2.11)
 
 This section is a minimal, self-contained reference so you can wire function tools without internet:
@@ -205,6 +209,12 @@ agent = Agent(
 )
 ```
 
+Notes:
+
+- The decorator inspects function signature and docstring to build the tool schema automatically.
+- Tool functions should return compact outputs (e.g., short strings) to keep model context efficient.
+- Use our wrapper’s policy controls via environment variables listed above.
+
 ## Tests (TDD additions)
 
 - Add `tests/test_terminal_function_tools.py` covering:
@@ -215,7 +225,6 @@ agent = Agent(
   5. Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
 
 ### Testing notes
-
 - Reuse `tmp_path` and pattern from `tests/test_terminal_tool.py` where helpful.
 - Use `monkeypatch.setenv` to configure env per test to avoid cross-test contamination.
 

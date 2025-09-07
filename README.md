@@ -132,7 +132,13 @@ Environment variables:
 
 - `REDIS_URL` (default `redis://localhost:6379/0` or compose service URL)
 - `AGENT_NAME` (worker target agent; default `DevAgent`)
-- `OPENAI_API_KEY` (required if using real Agents SDK models/tools)
+- `AGENT_MODEL` (Agents SDK model name, e.g., `gpt-4o-mini`; default `gpt-4o-mini`)
+- `AGENT_INSTRUCTIONS` (inline agent instructions; optional)
+- `AGENT_INSTRUCTIONS_FILE` (path to a file with agent instructions; overrides `AGENT_INSTRUCTIONS`)
+- `AGENT_TOOLS` (comma-separated tool names; currently unused/no-op, reserved for follow-ups)
+- `OPENAI_API_KEY` (if set, the Worker uses the OpenAI Agents SDK runner; if unset, it falls back to EchoRunner for local/dev)
+
+At startup, the Worker selects the runner based on `OPENAI_API_KEY` and logs the choice (Echo vs OpenAI) with the agent name/model.
 
 ### Terminal tool (policy via env)
 

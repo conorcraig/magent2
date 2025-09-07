@@ -102,11 +102,11 @@ Update `magent2/tools/mcp/__init__.py` to export:
 
 Augment `tests/test_mcp_stdio.py` with gateway tests:
 
-- Gateway lists and calls filtered tools
+1) Gateway lists and calls filtered tools
   - Temp server advertises `echo` and `secret` tools.
   - Allowlist only `echo`; assert `list_tools()` exposes only `echo` and `call('echo', {text:'hi'})` returns `hi`.
 
-- Gateway cleanup idempotent
+2) Gateway cleanup idempotent
   - Create gateway, start, `close()`, `close()` again; no exception.
 
 Optional demo server test (graceful skip):
