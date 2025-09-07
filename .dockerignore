@@ -8,3 +8,11 @@ build/
 reports/
 **/.pytest_cache
 **/.ruff_cache
+**/.mypy_cache
+**/.cache
+**/.coverage*
+*.egg-info/
+node_modules/
+.vscode/
+.idea/
+dist/
