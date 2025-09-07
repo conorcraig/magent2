@@ -134,6 +134,15 @@ Environment variables:
 - `AGENT_NAME` (worker target agent; default `DevAgent`)
 - `OPENAI_API_KEY` (required if using real Agents SDK models/tools)
 
+### Terminal tool (policy via env)
+
+- `TERMINAL_ALLOWED_COMMANDS`: comma‑separated list of allowed command basenames (e.g., `echo,bash,python3`). Default: empty (deny by default).
+- `TERMINAL_TIMEOUT_SECONDS`: float seconds before forceful termination. Default: `5.0`.
+- `TERMINAL_OUTPUT_CAP_BYTES`: byte cap for combined stdout/stderr enforced by the low‑level tool. Default: `8192`.
+- `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS`: character cap for the concise string returned to the model. Default: `1000`.
+- `TERMINAL_REDACT_SUBSTRINGS`: comma‑separated substrings to redact in outputs.
+- `TERMINAL_REDACT_PATTERNS`: comma‑separated regex patterns to redact in outputs (built‑ins always applied: `sk-[A-Za-z0-9_-]{10,}` and common sensitive labels).
+
 ## Contracts
 
 Frozen contracts (v1) for parallel work:
