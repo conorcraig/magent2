@@ -131,6 +131,7 @@ __all__ = [
     "terminal_run",
 ]
 
+
 def _maybe_get_function_tool() -> Any | None:
     """Return the Agents SDK function_tool decorator if available."""
     try:
@@ -138,6 +139,7 @@ def _maybe_get_function_tool() -> Any | None:
     except Exception:  # noqa: BLE001
         return None
     return getattr(module, "function_tool", None)
+
 
 # Optional: expose as an Agents SDK function tool if the decorator is available
 _function_tool = _maybe_get_function_tool()
