@@ -165,10 +165,12 @@ asyncio.run(main())
 
 - Pass a session object to preserve history across runs: `Runner.run_streamed(agent, input=..., session=session)`.
 - If available in your installed version, a persistent session can be imported as:
+
   ```python
   from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession  # if present
   session = SQLAlchemySession("sqlite:///./agents.db", key="conv_123")
   ```
+
 - If unavailable, keep an in-memory dict keyed by `conversation_id` and reuse the same object (or `None`) consistently.
 
 ### Tools (optional)

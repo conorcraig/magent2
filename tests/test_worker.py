@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import (
     MessageEnvelope,
@@ -160,7 +162,7 @@ def test_worker_one_run_per_conversation() -> None:
     ]
 
 
-def test_runner_selection_by_env(monkeypatch):
+def test_runner_selection_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # Import helper after patching env each time
     import importlib
 

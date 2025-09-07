@@ -1,25 +1,32 @@
 from __future__ import annotations
 
 import types
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 
-from magent2.models.envelope import MessageEnvelope, OutputEvent, TokenEvent, ToolStepEvent
+from magent2.models.envelope import (
+    BaseStreamEvent,
+    MessageEnvelope,
+    OutputEvent,
+    TokenEvent,
+    ToolStepEvent,
+)
 
 
 class _FakeResultStream:
     def __init__(self, events: list[Any]) -> None:
         self._events = events
 
-    async def stream_events(self):  # pragma: no cover - exercised via adapter
+    async def stream_events(self) -> AsyncIterator[Any]:  # pragma: no cover - exercised via adapter
         for ev in self._events:
             yield ev
 
 
 class _FakeSDKRunner:
     @staticmethod
-    def run_streamed(agent: Any, input: str, session: Any) -> _FakeResultStream:  # type: ignore[name-defined]
+    def run_streamed(agent: Any, input: str, session: Any) -> _FakeResultStream:
         # The agent is unused in the fake; we only validate that our adapter calls this API shape
         return _FakeResultStream(_FakeSDKRunner._next_events())
 
@@ -72,10 +79,21 @@ def test_adapter_maps_token_tool_and_output(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     # Act
-    out: list[Any] = list(runner.stream_run(env))
+    out_any: list[Any] = list(runner.stream_run(env))
+    out = cast(list[BaseStreamEvent], out_any)
 
     # Assert order and mapping
-    assert [e.event for e in out] == [
+    kinds: list[str] = []
+    for e in out:
+        if isinstance(e, TokenEvent):
+            kinds.append("token")
+        elif isinstance(e, ToolStepEvent):
+            kinds.append("tool_step")
+        elif isinstance(e, OutputEvent):
+            kinds.append("output")
+        else:
+            kinds.append("?")
+    assert kinds == [
         "token",
         "token",
         "tool_step",
@@ -103,7 +121,7 @@ def test_adapter_reuses_session_by_conversation(monkeypatch: pytest.MonkeyPatch)
 
     class _SpySDKRunner:
         @staticmethod
-        def run_streamed(agent: Any, input: str, session: Any) -> _FakeResultStream:  # type: ignore[name-defined]
+        def run_streamed(agent: Any, input: str, session: Any) -> _FakeResultStream:
             seen_sessions.append(session)
             return _FakeResultStream([])
 
@@ -167,9 +185,14 @@ def test_adapter_prefers_explicit_final_output_and_usage(monkeypatch: pytest.Mon
         content="hello",
     )
 
-    out = list(runner.stream_run(env))
-    # Should include token and explicit output (not synthesized from tokens)
-    assert [e.event for e in out] == ["token", "output"]
+    out_any = list(runner.stream_run(env))
+    out = cast(list[BaseStreamEvent], out_any)
+    kinds = [
+        "token" if isinstance(e, TokenEvent) else "output" if isinstance(e, OutputEvent) else "?"
+        for e in out
+    ]
+    assert kinds == ["token", "output"]
+    assert isinstance(out[-1], OutputEvent)
     assert out[-1].text == "Final answer"
     assert out[-1].usage == {"input_tokens": 5, "output_tokens": 2}
 
@@ -200,9 +223,14 @@ def test_adapter_tolerates_mapping_errors_and_completes(monkeypatch: pytest.Monk
         content="hello",
     )
 
-    out = list(runner.stream_run(env))
-    # Should still produce a synthesized final OutputEvent and terminate
-    assert [e.event for e in out] == ["token", "output"]
+    out_any = list(runner.stream_run(env))
+    out = cast(list[BaseStreamEvent], out_any)
+    kinds = [
+        "token" if isinstance(e, TokenEvent) else "output" if isinstance(e, OutputEvent) else "?"
+        for e in out
+    ]
+    assert kinds == ["token", "output"]
+    assert isinstance(out[-1], OutputEvent)
     assert out[-1].text.startswith("A")
 
 
@@ -224,9 +252,9 @@ def test_adapter_handles_backpressure(monkeypatch: pytest.MonkeyPatch) -> None:
     # Monkeypatch Queue.put_nowait on instance created inside runner
     original_run_stream = runner.stream_run
 
-    def _wrapped_stream(env: MessageEnvelope):
+    def _wrapped_stream(env: MessageEnvelope) -> list[BaseStreamEvent]:
         gen = original_run_stream(env)
-        return gen
+        return list(cast(list[BaseStreamEvent], gen))
 
     # We can't easily intercept the internal queue here.
     # Instead, rely on the final OutputEvent being emitted.
@@ -237,6 +265,7 @@ def test_adapter_handles_backpressure(monkeypatch: pytest.MonkeyPatch) -> None:
         type="message",
         content="hello",
     )
-    out = list(runner.stream_run(env))
+    out_any = list(runner.stream_run(env))
+    out = cast(list[BaseStreamEvent], out_any)
     # Even if tokens were dropped, there must be an OutputEvent
-    assert out and out[-1].event == "output"
+    assert out and isinstance(out[-1], OutputEvent) and out[-1].event == "output"
