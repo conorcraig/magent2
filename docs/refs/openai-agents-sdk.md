@@ -184,6 +184,33 @@ agent = Agent(name="MathAgent", instructions="Use tools when helpful.", tools=[a
 result = Runner.run_sync(agent, "What is 2+3?")
 ```
 
+### Function tools quick reference (naming, schema, returns)
+
+- Decorator: `@function_tool` or `@function_tool(name="...", description="...")`.
+- Input schema is inferred from Python type hints on parameters.
+- Return values must be JSON-serializable (basic types, dicts/lists).
+- Use precise typing (`dict[str, Any]`, `list[dict[str, Any]]`) for good schemas.
+- Prefer wrapping objects in dicts, e.g., `{ "task": { ... } }` or `{ "ok": true }`.
+- For bad input, raise `ValueError` with a concise message; the SDK surfaces it.
+- For transient backend errors, consider returning `{ "error": "...", "transient": true }`.
+
+Example:
+
+```python
+from __future__ import annotations
+from typing import Any
+from agents import function_tool
+
+@function_tool(name="todo_create")
+def create_task(conversation_id: str, title: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not conversation_id or not conversation_id.strip():
+        raise ValueError("conversation_id must be non-empty")
+    if not title or not title.strip():
+        raise ValueError("title must be non-empty")
+    # ... call your store and return a JSON-safe dict
+    return {"task": {"id": "example"}}
+```
+
 ### Pitfalls
 
 - Event shapes may evolve; prefer feature checks over strict type equality.

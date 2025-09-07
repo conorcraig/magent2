@@ -116,6 +116,7 @@ async def run_stream(input_text: str, session=None):
 ```
 
 Notes:
+
 - If `rs.get_final_output()` (or similar) is unavailable, accumulate token deltas during iteration and emit a single `OutputEvent` at the end with the joined text.
 - If tools are configured, prefer emitting `ToolStepEvent` at invocation time (with args) and another at completion with `result_summary` (short string).
 
