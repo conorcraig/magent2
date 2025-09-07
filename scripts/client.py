@@ -39,6 +39,9 @@ class StreamPrinter:
         self._final_text: str | None = None
         # Optional cutoff: ignore events older than this timestamp (ISO 8601 in data)
         self._since_iso: str | None = None
+        # Track AI turn token streaming to avoid duplicating final text
+        self._saw_tokens = False
+        self._printed_ai_header = False
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -96,45 +99,77 @@ class StreamPrinter:
 
     def _handle_event(self, data: dict[str, Any]) -> None:
         event_type = str(data.get("event", "")).lower()
-        # Filter out stale events when a cutoff is set
         if self._since_iso:
             ev_created = str(data.get("created_at", ""))
             try:
                 if ev_created and ev_created < self._since_iso:
                     return
             except Exception:
-                pass
+                return
         if event_type == "token":
-            text = str(data.get("text", ""))
-            # Print tokens inline
-            self._print_inline(text)
+            self._handle_token(data)
             return
         if event_type == "user_message":
-            sender = str(data.get("sender", "user"))
-            text = str(data.get("text", ""))
-            self._println("")
-            self._println(f"{sender}> {text}")
+            self._handle_user_message(data)
             return
         if event_type == "tool_step":
-            name = data.get("name", "tool")
-            summary = data.get("result_summary")
-            args = data.get("args")
-            summary_text = summary if isinstance(summary, str) else json.dumps(args)[:200]
-            self._println("")
-            self._println(f"[tool] {name}: {summary_text}")
+            self._handle_tool_step(data)
+            return
+        if event_type == "log":
+            self._handle_log(data)
             return
         if event_type == "output":
-            text = str(data.get("text", ""))
-            # Ensure newline then print final text line
-            self._println("")
-            self._println(f"AI> {text}")
-            # Signal one-shot completion
-            self._final_text = text
-            self._final_event.set()
+            self._handle_output(data)
             return
-        # Fallback
         self._println("")
         self._println(f"[event] {json.dumps(data)[:500]}")
+
+    def _handle_token(self, data: dict[str, Any]) -> None:
+        text = str(data.get("text", ""))
+        if not self._printed_ai_header:
+            self._println("")
+            self._print_inline("AI> ")
+            self._printed_ai_header = True
+        self._print_inline(text)
+        self._saw_tokens = True
+
+    def _handle_user_message(self, data: dict[str, Any]) -> None:
+        sender = str(data.get("sender", "user"))
+        text = str(data.get("text", ""))
+        self._println("")
+        self._println(f"{sender}> {text}")
+        self._saw_tokens = False
+        self._printed_ai_header = False
+
+    def _handle_tool_step(self, data: dict[str, Any]) -> None:
+        name = data.get("name", "tool")
+        summary = data.get("result_summary")
+        args = data.get("args")
+        summary_text = summary if isinstance(summary, str) else json.dumps(args)[:200]
+        self._println("")
+        self._println(f"[tool] {name}: {summary_text}")
+
+    def _handle_log(self, data: dict[str, Any]) -> None:
+        level = str(data.get("level", "info")).upper()
+        component = str(data.get("component", "agent"))
+        message = str(data.get("message", ""))
+        self._println("")
+        if component:
+            self._println(f"[log][{level}] {component}: {message}")
+        else:
+            self._println(f"[log][{level}] {message}")
+
+    def _handle_output(self, data: dict[str, Any]) -> None:
+        text = str(data.get("text", ""))
+        if self._saw_tokens:
+            self._println("")
+        else:
+            self._println("")
+            self._println(f"AI> {text}")
+        self._saw_tokens = False
+        self._printed_ai_header = False
+        self._final_text = text
+        self._final_event.set()
 
     # ----- one-shot helpers -----
     def wait_for_final(self, timeout: float | None) -> tuple[bool, str | None]:
