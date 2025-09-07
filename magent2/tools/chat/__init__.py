@@ -8,7 +8,11 @@ from .function_tools import send_message, set_bus_for_testing
 
 
 @function_tool
-def chat_send(recipient: str, content: str) -> dict[str, Any]:
+def chat_send(
+    recipient: str,
+    content: str,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
     """Send a chat message to a conversation or agent via Bus.
 
     Args:
@@ -19,7 +23,7 @@ def chat_send(recipient: str, content: str) -> dict[str, Any]:
         {"ok": bool, "envelope_id": str, "published_to": list[str]}
     """
 
-    return send_message(recipient, content)
+    return send_message(recipient, content, conversation_id=conversation_id)
 
 
 __all__ = ["chat_send", "send_message", "set_bus_for_testing"]

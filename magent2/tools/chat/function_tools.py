@@ -7,21 +7,29 @@ from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import MessageEnvelope
 
 _TEST_BUS: Bus | None = None
+_BUS_CACHE: Bus | None = None
 
 
 def set_bus_for_testing(bus: Bus | None) -> None:
-    global _TEST_BUS
+    global _TEST_BUS, _BUS_CACHE
     _TEST_BUS = bus
+    # Keep cache in sync so tests can reset to a clean state
+    if bus is None:
+        _BUS_CACHE = None
 
 
 def _get_bus() -> Bus:
     if _TEST_BUS is not None:
         return _TEST_BUS
+    global _BUS_CACHE
+    if _BUS_CACHE is not None:
+        return _BUS_CACHE
     # Lazy import to avoid hard dependency in tests
     from magent2.bus.redis_adapter import RedisBus
 
     url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    return RedisBus(url)
+    _BUS_CACHE = RedisBus(url)
+    return _BUS_CACHE
 
 
 def _resolve_sender() -> str:
@@ -29,12 +37,16 @@ def _resolve_sender() -> str:
     return f"agent:{name}" if name else "agent:unknown"
 
 
-def _resolve_conversation_id(recipient: str, ctx: dict[str, Any] | None) -> str:
+def _resolve_conversation_id(
+    recipient: str, ctx: dict[str, Any] | None, explicit_conversation_id: str | None
+) -> str:
     if recipient.startswith("chat:"):
         cid = recipient.split(":", 1)[1]
         if cid:
             return cid
-    # For agent recipients, try context/env
+    # For agent recipients, precedence: explicit param > context > env
+    if explicit_conversation_id is not None and explicit_conversation_id.strip():
+        return explicit_conversation_id.strip()
     if ctx is not None:
         value = ctx.get("conversation_id")
         cid_ctx = str(value).strip() if value is not None else ""
@@ -78,7 +90,11 @@ def _publish(bus: Bus, envelope: MessageEnvelope) -> list[str]:
 
 
 def send_message(
-    recipient: str, content: str, *, context: dict[str, Any] | None = None
+    recipient: str,
+    content: str,
+    *,
+    conversation_id: str | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rec = (recipient or "").strip()
     if not rec or not (rec.startswith("chat:") or rec.startswith("agent:")):
@@ -87,9 +103,9 @@ def send_message(
     if not text:
         raise ValueError("content must be non-empty")
 
-    conversation_id = _resolve_conversation_id(rec, context)
+    cid = _resolve_conversation_id(rec, context, conversation_id)
     sender = _resolve_sender()
-    env = _build_envelope(conversation_id, sender, rec, text)
+    env = _build_envelope(cid, sender, rec, text)
 
     bus = _get_bus()
     published_to = _publish(bus, env)

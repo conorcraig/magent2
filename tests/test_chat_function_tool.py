@@ -92,3 +92,26 @@ def test_invalid_recipient_raises_value_error(bus: InMemoryBus, bad_recipient: s
 def test_blank_content_raises_value_error(bus: InMemoryBus, bad_content: str) -> None:
     with pytest.raises(ValueError):
         send_message("chat:convX", bad_content)
+
+
+def test_agent_recipient_requires_conversation_id_when_no_context_or_env(
+    bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CHAT_TOOL_CONVERSATION_ID", raising=False)
+    with pytest.raises(ValueError):
+        send_message("agent:DevAgent", "ping")
+
+
+def test_conversation_id_param_has_highest_precedence(
+    bus: InMemoryBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CHAT_TOOL_CONVERSATION_ID", "env_cid")
+    result = send_message(
+        "agent:DevAgent",
+        "hello",
+        conversation_id="param_cid",
+        context={"conversation_id": "ctx_cid"},
+    )
+    assert set(result["published_to"]) == {"chat:param_cid", "chat:DevAgent"}
+    last_conv = _last_message(bus, "chat:param_cid")
+    assert last_conv.payload["conversation_id"] == "param_cid"
