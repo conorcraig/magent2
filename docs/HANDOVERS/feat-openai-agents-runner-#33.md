@@ -74,6 +74,14 @@ Owner: next agent picking up Issue #33
 - Keep runner mapping defensive: accept both typed objects and dict-shaped events; ignore unrecognized event types; log at debug level if needed (logging infra may land later; keep silent or minimal).
 - Keep tool support minimal initially. If no tools are configured, the agent will operate as pure chat.
 
+Naming note (avoid collisions): our codebase defines a local `Runner` Protocol in `magent2/worker/worker.py`. To prevent confusion with the SDK `Runner`, alias the import when implementing the adapter, e.g.:
+
+```python
+from agents import Runner as SDKRunner  # SDK class
+
+# In adapter implementation, call SDKRunner.run_streamed(...)
+```
+
 ### SDK usage cheatsheet (no web needed)
 
 Use these snippets with `openai-agents>=0.2.11` (see `pyproject.toml`).
