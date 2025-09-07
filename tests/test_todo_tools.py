@@ -112,8 +112,9 @@ def test_update_no_fields_raises(tool_env: dict[str, str]) -> None:
 
 @pytest.mark.parametrize("bad", [123, "x", ["k", "v"]])
 def test_metadata_must_be_dict_on_create_and_update(tool_env: dict[str, str], bad: object) -> None:
-    from magent2.tools.todo.tools import create_task_tool, update_task_tool
     import uuid as _uuid
+
+    from magent2.tools.todo.tools import create_task_tool, update_task_tool
 
     with pytest.raises(ValueError):
         create_task_tool("conv6", "Title", bad)  # type: ignore[arg-type]
@@ -122,16 +123,18 @@ def test_metadata_must_be_dict_on_create_and_update(tool_env: dict[str, str], ba
         update_task_tool(str(_uuid.uuid4()), metadata=bad)  # type: ignore[arg-type]
 
 
-def test_transient_error_on_create(monkeypatch: pytest.MonkeyPatch, tool_env: dict[str, str]) -> None:
+def test_transient_error_on_create(
+    monkeypatch: pytest.MonkeyPatch, tool_env: dict[str, str]
+) -> None:
     import redis as _redis
-    from magent2.tools.todo.redis_store import RedisTodoStore
-    from magent2.tools.todo import tools as todo_tools
 
-    def _boom(self: object, *args: object, **kwargs: object):
+    from magent2.tools.todo import tools as todo_tools
+    from magent2.tools.todo.redis_store import RedisTodoStore
+
+    def _boom(self: object, *args: object, **kwargs: object) -> None:
         raise _redis.exceptions.RedisError("boom")
 
     monkeypatch.setattr(RedisTodoStore, "create_task", _boom, raising=True)
     res = todo_tools.create_task_tool("conv7", "Title")
     assert res["task"] is None
     assert res.get("transient") is True
-

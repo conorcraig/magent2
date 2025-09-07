@@ -1,6 +1,7 @@
 # Handover: Expose Todo function tools (#35)
 
 ## Context
+
 - Goal: Expose CRUD + list operations as OpenAI Agents SDK function tools backed by `RedisTodoStore`.
 - Scope limited to `magent2/tools/todo/` and tests under `tests/`.
 - Do not change frozen v1 contracts (envelope, bus). See `docs/CONTRACTS.md`.
@@ -24,6 +25,7 @@
 ## Design
 
 ### File layout
+
 - Add `magent2/tools/todo/tools.py` exporting five function tools and helpers.
   - Public exports: `create_task_tool`, `get_task_tool`, `list_tasks_tool`, `update_task_tool`, `delete_task_tool`.
   - Internal helpers: `_get_store()`, `_serialize_task(task: Task) -> dict`, simple validators.

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import os
 from typing import Any
 
 import redis
-from agents import function_tool
 
 from .models import Task
 from .redis_store import RedisTodoStore
@@ -43,11 +43,10 @@ def _require_metadata_dict(name: str, value: dict[str, Any] | None) -> dict[str,
     return value
 
 
-@function_tool
-def todo_create(
+# Plain callable tools (used by tests and callers expecting functions)
+def create_task_tool(
     conversation_id: str, title: str, metadata: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Create a todo task."""
     cid = _require_str_non_empty("conversation_id", conversation_id)
     ttl = _require_str_non_empty("title", title)
     md = _require_metadata_dict("metadata", metadata)
@@ -58,9 +57,7 @@ def todo_create(
         return {"task": None, "error": str(e), "transient": True}
 
 
-@function_tool
-def todo_get(task_id: str) -> dict[str, Any]:
-    """Get a todo task by id."""
+def get_task_tool(task_id: str) -> dict[str, Any]:
     tid = _require_str_non_empty("task_id", task_id)
     try:
         t = _get_store().get_task(tid)
@@ -69,9 +66,7 @@ def todo_get(task_id: str) -> dict[str, Any]:
         return {"task": None, "error": str(e), "transient": True}
 
 
-@function_tool
-def todo_list(conversation_id: str) -> dict[str, Any]:
-    """List todo tasks for a conversation."""
+def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
     cid = _require_str_non_empty("conversation_id", conversation_id)
     try:
         tasks = _get_store().list_tasks(cid)
@@ -80,15 +75,13 @@ def todo_list(conversation_id: str) -> dict[str, Any]:
         return {"tasks": [], "error": str(e), "transient": True}
 
 
-@function_tool
-def todo_update(
+def update_task_tool(
     task_id: str,
     *,
     title: str | None = None,
     completed: bool | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Update a todo task by id."""
     tid = _require_str_non_empty("task_id", task_id)
     if title is not None and not isinstance(title, str):
         raise ValueError("title must be a string if provided")
@@ -102,9 +95,7 @@ def todo_update(
         return {"task": None, "error": str(e), "transient": True}
 
 
-@function_tool
-def todo_delete(task_id: str) -> dict[str, Any]:
-    """Delete a todo task by id."""
+def delete_task_tool(task_id: str) -> dict[str, Any]:
     tid = _require_str_non_empty("task_id", task_id)
     try:
         ok = _get_store().delete_task(tid)
@@ -113,43 +104,67 @@ def todo_delete(task_id: str) -> dict[str, Any]:
         return {"ok": False, "error": str(e), "transient": True}
 
 
-from typing import Callable, Protocol, cast
-
-# Decorated, exported tools with precise callable types for mypy
-class _CreateTaskTool(Protocol):
-    def __call__(
-        self, conversation_id: str, title: str, metadata: dict[str, Any] | None = None
-    ) -> dict[str, Any]: ...
-
-
-class _GetTaskTool(Protocol):
-    def __call__(self, task_id: str) -> dict[str, Any]: ...
+__all__ = [
+    "create_task_tool",
+    "get_task_tool",
+    "list_tasks_tool",
+    "update_task_tool",
+    "delete_task_tool",
+]
 
 
-class _ListTasksTool(Protocol):
-    def __call__(self, conversation_id: str) -> dict[str, Any]: ...
+# Optional: expose Agents SDK function tools if the decorator is available
+def _maybe_get_function_tool() -> Any | None:
+    try:
+        module = importlib.import_module("agents")
+    except Exception:  # noqa: BLE001
+        return None
+    return getattr(module, "function_tool", None)
 
 
-class _UpdateTaskTool(Protocol):
-    def __call__(
-        self,
+_function_tool = _maybe_get_function_tool()
+
+if _function_tool is not None:
+
+    @_function_tool(strict_mode=False)
+    def todo_create(
+        conversation_id: str, title: str, metadata: dict[str, Any] | None = None
+    ) -> Any:
+        """Create a todo task."""
+        return create_task_tool(conversation_id, title, metadata)
+
+    @_function_tool
+    def todo_get(task_id: str) -> Any:
+        """Get a todo task by id."""
+        return get_task_tool(task_id)
+
+    @_function_tool
+    def todo_list(conversation_id: str) -> Any:
+        """List todo tasks for a conversation."""
+        return list_tasks_tool(conversation_id)
+
+    @_function_tool(strict_mode=False)
+    def todo_update(
         task_id: str,
         *,
         title: str | None = None,
         completed: bool | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> Any:
+        """Update a todo task by id."""
+        return update_task_tool(task_id, title=title, completed=completed, metadata=metadata)
 
+    @_function_tool
+    def todo_delete(task_id: str) -> Any:
+        """Delete a todo task by id."""
+        return delete_task_tool(task_id)
 
-class _DeleteTaskTool(Protocol):
-    def __call__(self, task_id: str) -> dict[str, Any]: ...
-
-
-create_task_tool = cast(_CreateTaskTool, todo_create)
-get_task_tool = cast(_GetTaskTool, todo_get)
-list_tasks_tool = cast(_ListTasksTool, todo_list)
-update_task_tool = cast(_UpdateTaskTool, todo_update)
-delete_task_tool = cast(_DeleteTaskTool, todo_delete)
-
-__all__ = ["create_task_tool", "get_task_tool", "list_tasks_tool", "update_task_tool", "delete_task_tool"]
-
+    __all__.extend(
+        [
+            "todo_create",
+            "todo_get",
+            "todo_list",
+            "todo_update",
+            "todo_delete",
+        ]
+    )

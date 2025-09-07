@@ -225,6 +225,7 @@ Notes:
   5. Optional: if SDK decorator is confirmed and lightweight, assert a function-tool schema is generated with the expected parameters (skip if SDK unavailable).
 
 ### Testing notes
+
 - Reuse `tmp_path` and pattern from `tests/test_terminal_tool.py` where helpful.
 - Use `monkeypatch.setenv` to configure env per test to avoid cross-test contamination.
 
