@@ -1,7 +1,50 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-merge-conflict
+      - id: debug-statements
+        types: [python]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.5.7
     hooks:
       - id: ruff
-        args: ["--select=E,F,I,UP"]
+        args: ["--select=E,F,I,UP", "--fix", "--exit-non-zero-on-fix", "--show-fixes"]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (staged files only)
+        language: system
+        entry: uv run python .github/scripts/mypy_staged.py
+        pass_filenames: true
+        types: [python]
+
+      - id: xenon-complexity
+        name: Check Code Complexity (staged)
+        entry: bash .github/scripts/ci/complexity_check.sh
+        language: system
+        pass_filenames: true
+        types: [python]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
+fail_fast: false
+minimum_pre_commit_version: "3.0.0"
+default_stages: [pre-commit]
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
