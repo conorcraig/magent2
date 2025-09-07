@@ -23,7 +23,9 @@ def build_runner_from_env() -> Runner:
         from agents import Agent  # defer import to avoid issues in Echo mode
 
         agent = Agent(name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model)
+        print(f"[worker] runner=OpenAI agent={cfg.agent_name} model={cfg.model}")
         return OpenAIAgentsRunner(agent)
+    print(f"[worker] runner=Echo agent={cfg.agent_name}")
     return EchoRunner()
 
 
