@@ -245,6 +245,7 @@ def get_request_info(ctx: RunContextWrapper[Any]) -> dict[str, Any]:
 ```
 
 Notes:
+
 - If `RunContextWrapper` is not present in your installed SDK version, omit the context parameter and read from environment/config instead.
 - For magent2 chat tools, prefer passing `conversation_id` via context when available.
 
@@ -267,4 +268,5 @@ def safe_echo(text: str) -> str:
 ```
 
 Tip:
+
 - Prefer raising `ValueError` for input validation issues so the SDK surfaces a clear tool error.
