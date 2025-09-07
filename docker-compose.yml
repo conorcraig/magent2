@@ -16,7 +16,7 @@ services:
     working_dir: /app
     environment:
       - REDIS_URL=redis://redis:6379/0
-    command: ["uvicorn", "magent2.gateway.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--lifespan", "off"]
+    command: ["uvicorn", "magent2.gateway.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--no-access-log", "--lifespan", "off"]
     depends_on:
       redis:
         condition: service_healthy
