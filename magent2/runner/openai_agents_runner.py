@@ -4,7 +4,7 @@ import asyncio
 import threading
 from collections import deque
 from collections.abc import Iterable
-from queue import Queue
+from queue import Full, Queue
 from typing import Any
 
 from agents import Agent
@@ -45,12 +45,13 @@ class OpenAIAgentsRunner:
         def _runner() -> None:
             try:
                 asyncio.run(self._run_streaming(envelope, events_queue))
-            except Exception:
-                # Silently swallow to avoid breaking the worker; sentinel still sent
-                pass
             finally:
                 # Signal completion regardless of errors
-                events_queue.put(sentinel)
+                try:
+                    events_queue.put_nowait(sentinel)
+                except Full:
+                    # Best-effort: if queue is full, iterator will finish when the queue is drained
+                    pass
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -108,29 +109,47 @@ class OpenAIAgentsRunner:
 
         saw_explicit_output = False
         async for ev in result_stream.stream_events():
-            mapped = self._map_event(envelope.conversation_id, ev, token_index)
+            try:
+                mapped = self._map_event(envelope.conversation_id, ev, token_index)
+            except Exception:
+                # Skip malformed/unknown events without killing the stream
+                continue
             if mapped is None:
                 continue
             if isinstance(mapped, TokenEvent):
                 token_index += 1
                 accumulated_text_parts.append(mapped.text)
-                queue.put(mapped)
+                try:
+                    queue.put_nowait(mapped)
+                except Full:
+                    # Drop tokens under backpressure; final OutputEvent will still summarize
+                    pass
             elif isinstance(mapped, ToolStepEvent):
-                queue.put(mapped)
+                try:
+                    queue.put_nowait(mapped)
+                except Full:
+                    pass
             elif isinstance(mapped, OutputEvent):
                 # If the SDK yields a final output explicitly, prefer it
-                queue.put(mapped)
+                try:
+                    queue.put_nowait(mapped)
+                except Full:
+                    pass
                 saw_explicit_output = True
 
         # Ensure we always emit a final OutputEvent if not already provided
         if not saw_explicit_output:
             final_text = "".join(accumulated_text_parts)
-            queue.put(
-                OutputEvent(
-                    conversation_id=envelope.conversation_id,
-                    text=final_text,
+            try:
+                queue.put_nowait(
+                    OutputEvent(
+                        conversation_id=envelope.conversation_id,
+                        text=final_text,
+                    )
                 )
-            )
+            except Full:
+                # If backpressure is extreme, we still terminate via sentinel
+                pass
 
     def _map_event(self, conversation_id: str, ev: Any, token_index: int) -> BaseStreamEvent | None:
         """Map SDK stream event to our v1 stream events.

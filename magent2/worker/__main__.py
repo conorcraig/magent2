@@ -4,8 +4,6 @@ import os
 from collections.abc import Iterable
 from typing import Any
 
-from agents import Agent
-
 from magent2.bus.redis_adapter import RedisBus
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, TokenEvent
 from magent2.runner.config import load_config
@@ -22,6 +20,8 @@ class EchoRunner(Runner):
 def build_runner_from_env() -> Runner:
     cfg = load_config()
     if cfg.api_key:
+        from agents import Agent  # defer import to avoid issues in Echo mode
+
         agent = Agent(name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model)
         return OpenAIAgentsRunner(agent)
     return EchoRunner()

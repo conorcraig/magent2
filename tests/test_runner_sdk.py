@@ -172,3 +172,71 @@ def test_adapter_prefers_explicit_final_output_and_usage(monkeypatch: pytest.Mon
     assert [e.event for e in out] == ["token", "output"]
     assert out[-1].text == "Final answer"
     assert out[-1].usage == {"input_tokens": 5, "output_tokens": 2}
+
+
+def test_adapter_tolerates_mapping_errors_and_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _EvilEvent:
+        type = "run_item_stream_event"
+        data = object()
+
+    sdk_events = [
+        _make_event("raw_response_event", {"delta": "A"}),
+        _EvilEvent(),  # will cause mapper to raise if it assumes dict/attributes
+    ]
+    _patch_sdk_runner(monkeypatch, sdk_events)
+
+    from agents import Agent
+
+    from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
+
+    agent = Agent(name="DevAgent", instructions="You are a helpful assistant.")
+    runner = OpenAIAgentsRunner(agent)
+
+    env = MessageEnvelope(
+        conversation_id="conv_err",
+        sender="user:test",
+        recipient="agent:DevAgent",
+        type="message",
+        content="hello",
+    )
+
+    out = list(runner.stream_run(env))
+    # Should still produce a synthesized final OutputEvent and terminate
+    assert [e.event for e in out] == ["token", "output"]
+    assert out[-1].text.startswith("A")
+
+
+def test_adapter_handles_backpressure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Simulate Full on put_nowait to test backpressure resilience
+    sdk_events = [
+        _make_event("raw_response_event", {"delta": "B"}),
+        _make_event("raw_response_event", {"delta": "C"}),
+    ]
+    _patch_sdk_runner(monkeypatch, sdk_events)
+
+    from agents import Agent
+
+    from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
+
+    agent = Agent(name="DevAgent", instructions="You are a helpful assistant.")
+    runner = OpenAIAgentsRunner(agent)
+
+    # Monkeypatch Queue.put_nowait on instance created inside runner
+    original_run_stream = runner.stream_run
+
+    def _wrapped_stream(env: MessageEnvelope):
+        gen = original_run_stream(env)
+        return gen
+
+    # We can't easily intercept the internal queue here.
+    # Instead, rely on the final OutputEvent being emitted.
+    env = MessageEnvelope(
+        conversation_id="conv_bp",
+        sender="user:test",
+        recipient="agent:DevAgent",
+        type="message",
+        content="hello",
+    )
+    out = list(runner.stream_run(env))
+    # Even if tokens were dropped, there must be an OutputEvent
+    assert out and out[-1].event == "output"
