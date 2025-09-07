@@ -71,39 +71,61 @@ class RedisBus(Bus):
     def _read_without_group(
         self, topic: str, last_id: str | None, limit: int
     ) -> Iterable[BusMessage]:
-        # Tail: last N items in chronological order
         if last_id is None:
-            entries = self._redis.xrevrange(topic, "+", "-", count=limit) or []
-            entries.reverse()
-            for entry_id, data in entries:
-                yield self._to_bus_message(topic, data, entry_id)
-            return
+            return self._tail_messages(topic, limit)
 
-        # Find last_id by either canonical uuid stored in field 'id' or by entry id
+        # Fast path: if last_id looks like a Redis entry id, seek after it
+        if self._is_entry_id(last_id):
+            return self._collect_after_cursor(topic, last_id, limit)
+
+        # Otherwise, scan for the matching uuid in the 'id' field, then collect
+        chunk_size = max(limit * 2, 100)
+        cursor_id = self._scan_for_uuid(topic, last_id, chunk_size)
+        if cursor_id is None:
+            return []
+        return self._collect_after_cursor(topic, cursor_id, limit)
+
+    def _tail_messages(self, topic: str, limit: int) -> list[BusMessage]:
+        entries = self._redis.xrevrange(topic, "+", "-", count=limit) or []
+        entries.reverse()
+        return [self._to_bus_message(topic, data, entry_id) for entry_id, data in entries]
+
+    @staticmethod
+    def _is_entry_id(value: str) -> bool:
+        # Redis stream IDs are typically of the form '<milliseconds>-<sequence>'
+        if "-" not in value:
+            return False
+        left, _, right = value.partition("-")
+        return left.isdigit() and right.isdigit()
+
+    def _scan_for_uuid(self, topic: str, last_uuid: str, chunk_size: int) -> str | None:
         cursor = "-"
-        collected: list[tuple[str, dict[str, str]]] = []
-        found = False
         while True:
-            # Fetch in chunks to avoid pulling the entire stream for very large topics
             start = cursor if cursor == "-" else f"({cursor}"
-            chunk = self._redis.xrange(topic, start, "+", count=max(limit * 2, 100)) or []
+            chunk = self._redis.xrange(topic, start, "+", count=chunk_size) or []
+            if not chunk:
+                return None
+            for entry_id, data in chunk:
+                if data.get("id") == last_uuid:
+                    return entry_id
+            cursor = chunk[-1][0]
+
+    def _collect_after_cursor(self, topic: str, cursor_id: str, limit: int) -> list[BusMessage]:
+        messages: list[BusMessage] = []
+        next_id = cursor_id
+        while len(messages) < limit:
+            # Read strictly after the cursor id
+            start = f"({next_id}"
+            remaining = limit - len(messages)
+            chunk = self._redis.xrange(topic, start, "+", count=remaining) or []
             if not chunk:
                 break
             for entry_id, data in chunk:
-                if not found:
-                    if data.get("id") == last_id or entry_id == last_id:
-                        found = True
-                        continue
-                else:
-                    collected.append((entry_id, data))
-                    if len(collected) >= limit:
-                        break
-            if len(collected) >= limit or chunk[-1][0] == cursor:
-                break
-            cursor = chunk[-1][0]
-
-        for entry_id, data in collected[:limit]:
-            yield self._to_bus_message(topic, data, entry_id)
+                messages.append(self._to_bus_message(topic, data, entry_id))
+                next_id = entry_id
+                if len(messages) >= limit:
+                    break
+        return messages
 
     def _read_with_group(self, topic: str, limit: int) -> Iterable[BusMessage]:
         self._ensure_group(topic)
