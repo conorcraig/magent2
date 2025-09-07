@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 import re
 from dataclasses import dataclass
@@ -130,15 +131,20 @@ __all__ = [
     "terminal_run",
 ]
 
+def _maybe_get_function_tool() -> Any | None:
+    """Return the Agents SDK function_tool decorator if available."""
+    try:
+        module = importlib.import_module("agents")
+    except Exception:  # noqa: BLE001
+        return None
+    return getattr(module, "function_tool", None)
+
 # Optional: expose as an Agents SDK function tool if the decorator is available
-try:
-    from agents import function_tool as _function_tool  # type: ignore
-except Exception:  # noqa: BLE001
-    _function_tool = None  # type: ignore[assignment]
+_function_tool = _maybe_get_function_tool()
 
 if _function_tool is not None:
 
-    @_function_tool  # type: ignore[misc]
+    @_function_tool
     def terminal_run_tool(command: str, cwd: str | None = None) -> str:
         """Agents SDK function tool wrapper for `terminal_run`.
 
