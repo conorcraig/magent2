@@ -60,19 +60,79 @@ Requirements: Python 3.12+, uv, Docker (for Redis)
 ```bash
 uv venv
 uv sync
-cp .env.example .env  # set OPENAI_API_KEY and REDIS_URL if using Redis
-# start Redis (optional for local dev using compose)
-docker compose up -d
+cp .env.example .env  # set REDIS_URL; set OPENAI_API_KEY if using real Agents SDK
+```
 
-# run tests
-uv run pytest
+### Run locally with uv
+
+- Start Redis (Compose):
+
+```bash
+just up redis
+```
+
+- Run Gateway (port 8000):
+
+```bash
+uv run uvicorn magent2.gateway.asgi:app --host 0.0.0.0 --port 8000 \
+  --log-level warning --no-access-log
+```
+
+- Run Worker (echo runner by default):
+
+```bash
+uv run python -m magent2.worker
+```
+
+### Run with Docker Compose
+
+```bash
+just up
+# gateway: http://localhost:8000/health
+```
+
+### Send and stream via HTTP
+
+- Send a message:
+
+```bash
+curl -sS -X POST http://localhost:8000/send \
+  -H 'content-type: application/json' \
+  -d '{
+    "conversation_id": "conv1",
+    "sender": "user:local",
+    "recipient": "agent:DevAgent",
+    "type": "message",
+    "content": "hello"
+  }'
+```
+
+- Stream events (SSE):
+
+```bash
+curl -N http://localhost:8000/stream/conv1
 ```
 
 ## Development
 
 - Lint/format: `uv run ruff check` / `uv run ruff format`
 - Types: `uv run mypy`
-- Pre-commit (staged files): `pre-commit run`
+- Tests: `uv run pytest -q`
+- Pre-commit (staged files): `uv run pre-commit run`
+- Full local quality gate: `just check`
+
+## Entry points
+
+- Gateway ASGI app: `magent2.gateway.asgi:app`
+- Worker module: `python -m magent2.worker`
+
+## Configuration
+
+Environment variables:
+
+- `REDIS_URL` (default `redis://localhost:6379/0` or compose service URL)
+- `AGENT_NAME` (worker target agent; default `DevAgent`)
+- `OPENAI_API_KEY` (required if using real Agents SDK models/tools)
 
 ## Contracts
 
@@ -87,13 +147,9 @@ See `docs/CONTRACTS.md`.
 
 - Follow `docs/PARALLEL_WORK.md` for branch naming, ownership, and TDD
   expectations.
-- Always reference an issue number in commit messages and PRs.
+- Always reference an issue number in commit messages.
 
 ## Status
 
-- Core contracts and tests exist. Safe to start in parallel on:
-  - Worker (streaming + sessions)
-  - Redis adapter for Bus
-  - Tools (terminal, todo, MCP)
-  - Optional Gateway
-  - Observability
+- Core runtime, gateway, worker, tools, and tests are in place.
+- Compose images build locally with healthchecks; SSE streaming works.
