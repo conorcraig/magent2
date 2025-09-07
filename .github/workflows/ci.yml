@@ -27,7 +27,7 @@ jobs:
       - name: Complexity check (xenon + baseline ratchet)
         run: bash .github/scripts/ci/complexity_check.sh
       - name: Secrets detection (detect-secrets)
-        run: uv run detect-secrets scan --exclude-files '^\.baseline-.*$' | diff -u .baseline-secrets -
+        run: bash -lc 'FILES=$(git ls-files); uv run python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES'
 
   tests:
     name: Tests
