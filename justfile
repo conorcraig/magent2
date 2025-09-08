@@ -16,18 +16,32 @@ help:
 # ──────────────────────────────────────────────────────────────────────────────
 check:
 	# Full local quality gate: lint, types, complexity, secrets, tests
+	@printf "\033[1;36m==> Preparing reports directory\033[0m\n"
+	@mkdir -p reports
 	# Whitespace/EOL auto-fixes across the repo
-	uv run --isolated pre-commit run end-of-file-fixer --all-files || true
-	uv run --isolated pre-commit run trailing-whitespace --all-files || true
-	uv run --isolated ruff format .
-	uv run --isolated ruff check --fix .
+	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
+	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
+	@uv run --isolated pre-commit run trailing-whitespace --all-files |& tee reports/pre-commit-trailing-whitespace.log | sed -E '/^Installed [0-9]+ packages in /d' || true
+	# Ruff format and lint (with fixes) with logs
+	@printf "\033[1;36m==> Ruff: format\033[0m\n"
+	@uv run --isolated ruff format . |& tee reports/ruff-format.log | sed -E '/^Installed [0-9]+ packages in /d'
+	@printf "\033[1;36m==> Ruff: check (with --fix)\033[0m\n"
+	@uv run --isolated ruff check --fix . |& tee reports/ruff-check.log | sed -E '/^Installed [0-9]+ packages in /d'
 	# Markdown auto-fix (uses local Node via npx)
-	npx --yes markdownlint-cli2 --fix || true
-	bash .github/scripts/ci/type_check.sh
-	bash .github/scripts/ci/complexity_check.sh
+	@printf "\033[1;36m==> Markdownlint (fix)\033[0m\n"
+	@npx --yes markdownlint-cli2 --fix |& tee reports/markdownlint.log || true
+	# Type checking (mypy-baseline ratchet)
+	@printf "\033[1;36m==> Type check (mypy-baseline)\033[0m\n"
+	@bash .github/scripts/ci/type_check.sh
+	# Complexity check (xenon baseline ratchet)
+	@printf "\033[1;36m==> Complexity check (xenon-baseline)\033[0m\n"
+	@bash .github/scripts/ci/complexity_check.sh
 	# Validate secrets against baseline using pre-commit hook across tracked files (excluding baselines)
-	bash -c 'FILES=$(git ls-files | grep -v "^\\.baseline-"); uv run --isolated python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES'
-	uv run --isolated pytest -q
+	@printf "\033[1;36m==> Secrets scan (detect-secrets pre-commit hook)\033[0m\n"
+	@bash -c 'FILES=$(git ls-files | grep -v "^\\.baseline-"); uv run --isolated python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES' |& tee reports/detect-secrets.log | sed -E '/^Installed [0-9]+ packages in /d'
+	# Tests (quiet console output, full log available)
+	@printf "\033[1;36m==> Pytest\033[0m\n"
+	@uv run --isolated pytest -q --color=yes --durations=10 --junitxml=reports/pytest-junit.xml |& tee reports/pytest.log | sed -E '/^Installed [0-9]+ packages in /d'
 
 update:
 	# Update all baselines in one go

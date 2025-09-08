@@ -12,6 +12,7 @@ class RunnerConfig:
     model: str
     instructions: str
     tools: list[str]
+    max_turns: int
 
 
 def _read_instructions() -> str:
@@ -37,12 +38,20 @@ def load_config(env: dict[str, str] | None = None) -> RunnerConfig:
     e: dict[str, Any] = dict(os.environ)
     if env:
         e.update(env)
+    # Parse max turns from env with sensible default
+    max_turns_raw = (e.get("AGENT_MAX_TURNS") or "").strip()
+    try:
+        max_turns_val = int(max_turns_raw) if max_turns_raw else 10
+    except Exception:
+        max_turns_val = 10
+    max_turns = max(1, max_turns_val)
     return RunnerConfig(
         api_key=e.get("OPENAI_API_KEY"),
         agent_name=e.get("AGENT_NAME", "DevAgent"),
         model=e.get("AGENT_MODEL", "gpt-4o-mini"),
         instructions=_read_instructions(),
         tools=_read_tools(),
+        max_turns=max_turns,
     )
 
 

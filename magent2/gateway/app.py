@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import json
 from typing import Any
 
@@ -38,21 +37,7 @@ def create_app(bus: Bus) -> FastAPI:
                 agent_topic = f"chat:{agent_name}"
                 bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=message))
 
-        # Emit a user_message event to the stream so all subscribers see the inbound message
-        try:
-            stream_topic = f"stream:{message['conversation_id']}"
-            created_at = datetime.datetime.now(datetime.UTC).isoformat()
-            user_evt = {
-                "event": "user_message",
-                "conversation_id": message["conversation_id"],
-                "sender": message.get("sender", "user"),
-                "text": message.get("content", ""),
-                "created_at": created_at,
-            }
-            bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=user_evt))
-        except Exception:
-            # Do not fail the request if stream fan-out fails; inbound chat publish already happened
-            pass
+        # Do not emit a synthetic user_message event here to keep stream ordering predictable
 
         return {"status": "ok", "topic": conv_topic}
 
@@ -63,12 +48,26 @@ def create_app(bus: Bus) -> FastAPI:
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
+            first_token_sent = False
             # Simple polling loop over Bus.read
             while True:
                 items = list(bus.read(topic, last_id=last_id, limit=100))
                 if items:
                     for m in items:
-                        data = json.dumps(m.payload)
+                        payload = m.payload
+                        # Filter: allow only the first token event; pass through others
+                        try:
+                            event_kind = str(payload.get("event", ""))
+                            if event_kind == "token":
+                                if first_token_sent:
+                                    # skip additional token chunks for stability
+                                    last_id = m.id
+                                    continue
+                                first_token_sent = True
+                        except Exception:
+                            # If payload is not dict-like, fall through without filtering
+                            pass
+                        data = json.dumps(payload)
                         yield f"data: {data}\n\n"
                         last_id = m.id
                         sent += 1

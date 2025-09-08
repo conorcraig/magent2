@@ -22,8 +22,100 @@ def build_runner_from_env() -> Runner:
     if cfg.api_key:
         from agents import Agent  # defer import to avoid issues in Echo mode
 
-        agent = Agent(name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model)
-        print(f"[worker] runner=OpenAI agent={cfg.agent_name} model={cfg.model}")
+        def _load_tools(names: list[str]) -> list[Any]:
+            """Resolve configured tool names to decorated function tool objects.
+
+            If no names are provided, include a safe default set of available tools.
+            Unknown names are ignored.
+            """
+            available: dict[str, Any] = {}
+
+            # Terminal tool (single-function)
+            try:
+                from magent2.tools.terminal.function_tools import terminal_run_tool
+
+                available["terminal_run_tool"] = terminal_run_tool
+            except Exception:
+                pass
+
+            # Chat tool (send message via bus)
+            try:
+                from magent2.tools.chat import chat_send
+
+                available["chat_send"] = chat_send
+            except Exception:
+                pass
+
+            # Todo tools (CRUD)
+            try:
+                from magent2.tools.todo.tools import (
+                    todo_create,
+                    todo_delete,
+                    todo_get,
+                    todo_list,
+                    todo_update,
+                )
+
+                available.update(
+                    {
+                        "todo_create": todo_create,
+                        "todo_get": todo_get,
+                        "todo_list": todo_list,
+                        "todo_update": todo_update,
+                        "todo_delete": todo_delete,
+                    }
+                )
+            except Exception:
+                pass
+
+            # MCP tools (dynamic proxy -> function tools)
+            try:
+                from agents import function_tool  # needed to expose dynamic wrappers
+
+                from magent2.tools.mcp.registry import load_for_agent
+
+                gateway = load_for_agent(cfg.agent_name)
+                if gateway is not None:
+                    for info in gateway.list_tools():
+                        tool_name = str(info.name)
+
+                        def _make_proxy(name: str) -> Any:
+                            @function_tool(name_override=name)
+                            def _mcp_proxy(**kwargs: Any) -> dict[str, Any]:
+                                # Dispatch to gateway with a default timeout
+                                return gateway.call(name, arguments=kwargs, timeout=10.0)
+
+                            return _mcp_proxy
+
+                        # Only add if not shadowed by a built-in name
+                        if tool_name not in available:
+                            available[tool_name] = _make_proxy(tool_name)
+            except Exception:
+                # If MCP is misconfigured or decorator unavailable, skip silently
+                pass
+
+            resolved: list[Any] = []
+            if names:
+                for name in names:
+                    tool = available.get(name)
+                    if tool is not None:
+                        resolved.append(tool)
+                    else:
+                        print(f"[worker] warn: unknown tool '{name}', skipping")
+            else:
+                # Default to all detected tools for developer convenience
+                resolved = list(available.values())
+            return resolved
+
+        tools = _load_tools(cfg.tools)
+        _tools_any: Any = tools  # satisfy type checker without SDK-specific types
+        agent = Agent(
+            name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model, tools=_tools_any
+        )
+        tool_names = ",".join([getattr(t, "__name__", "tool") for t in tools]) or "<none>"
+        print(
+            f"[worker] runner=OpenAI agent={cfg.agent_name} model={cfg.model} tools=[{tool_names}]"
+        )
         return OpenAIAgentsRunner(agent)
     print(f"[worker] runner=Echo agent={cfg.agent_name}")
     return EchoRunner()

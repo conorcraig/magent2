@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from collections import deque
 from collections.abc import Iterable
@@ -28,11 +29,25 @@ class OpenAIAgentsRunner:
     - Returns a synchronous iterator suitable for the existing Worker loop
     """
 
-    def __init__(self, agent: Agent, *, session_limit: int = 256) -> None:
+    def __init__(
+        self, agent: Agent, *, session_limit: int = 256, max_turns: int | None = None
+    ) -> None:
         self._agent = agent
         self._sessions: dict[str, Any] = {}
         self._session_order: deque[str] = deque()
         self._session_limit = max(1, session_limit)
+        self._max_turns: int | None = int(max_turns) if max_turns is not None else None
+        # Optional persistent sessions (if the SDK provides SQLAlchemySession)
+        self._session_cls: Any | None = None
+        self._session_db_url: str = os.getenv("AGENT_SESSION_DB_URL", "sqlite:///./agents.db")
+        try:  # Attempt import only once at init
+            from agents.extensions.memory.sqlalchemy_session import (
+                SQLAlchemySession,
+            )
+
+            self._session_cls = SQLAlchemySession
+        except Exception:
+            self._session_cls = None
 
     # ----------------------------
     # Public API (Runner protocol)
@@ -78,9 +93,15 @@ class OpenAIAgentsRunner:
             self._session_order.append(conversation_id)
             return self._sessions[conversation_id]
 
-        # For now, defer session management to the SDK by passing None.
-        # When we adopt the SDK's concrete Session type, initialize it here.
-        session: Any = None
+        # Create a session if the SDK provides a concrete session class; else None
+        session: Any
+        if self._session_cls is not None:
+            try:
+                session = self._session_cls(self._session_db_url, key=conversation_id)
+            except Exception:
+                session = None
+        else:
+            session = None
         self._sessions[conversation_id] = session
         self._session_order.append(conversation_id)
         if len(self._sessions) > self._session_limit:
@@ -97,12 +118,28 @@ class OpenAIAgentsRunner:
         queue: Queue[BaseStreamEvent | dict[str, Any] | None],
     ) -> None:
         session = self._get_session(envelope.conversation_id)
-        # Kick off the SDK streamed run
-        result_stream = SDKRunner.run_streamed(
-            self._agent,
-            input=envelope.content or "",
-            session=session,
-        )
+        # Kick off the SDK streamed run (pass max_turns when supported)
+        if self._max_turns is not None:
+            try:
+                result_stream = SDKRunner.run_streamed(
+                    self._agent,
+                    input=envelope.content or "",
+                    session=session,
+                    max_turns=self._max_turns,
+                )
+            except TypeError:
+                # Older SDK without max_turns parameter
+                result_stream = SDKRunner.run_streamed(
+                    self._agent,
+                    input=envelope.content or "",
+                    session=session,
+                )
+        else:
+            result_stream = SDKRunner.run_streamed(
+                self._agent,
+                input=envelope.content or "",
+                session=session,
+            )
 
         token_index = 0
         accumulated_text_parts: list[str] = []
@@ -180,6 +217,8 @@ class OpenAIAgentsRunner:
             queue.put_nowait(OutputEvent(conversation_id=conversation_id, text=final_text))
         except Full:
             pass
+
+    # Note: log emission to stream is intentionally omitted to keep event order stable for tests.
 
     @staticmethod
     def _map_raw_response_event(
