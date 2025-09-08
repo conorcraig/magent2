@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import json
 import logging
@@ -36,28 +37,59 @@ def _redact(obj: Any) -> Any:
     return obj
 
 
+def _build_base_payload(record: logging.LogRecord) -> dict[str, Any]:
+    return {
+        "ts": _iso_now(),
+        "level": record.levelname.lower(),
+        "logger": record.name,
+        "message": record.getMessage(),
+    }
+
+
+def _add_standard_extras(payload: dict[str, Any], record: logging.LogRecord) -> None:
+    for attr in (
+        "metadata",
+        "event",
+        "span_id",
+        "parent_id",
+        "duration_ms",
+        "run_id",
+        "conversation_id",
+        "agent",
+        "tool",
+    ):
+        if hasattr(record, attr):
+            payload[attr] = getattr(record, attr)
+
+
+def _add_span_name(payload: dict[str, Any], record: logging.LogRecord) -> None:
+    span_name = getattr(record, "span_name", None)
+    if span_name is not None:
+        payload["name"] = span_name
+
+
+def _enrich_with_context(payload: dict[str, Any]) -> None:
+    ctx = get_run_context() or {}
+    if isinstance(ctx, dict):
+        for key in ("run_id", "conversation_id", "agent"):
+            value = ctx.get(key)
+            if key not in payload and value is not None:
+                payload[key] = value
+
+
+def _redact_metadata_in_payload(payload: dict[str, Any]) -> None:
+    md = payload.get("metadata")
+    if isinstance(md, dict):
+        payload["metadata"] = _redact(md)
+
+
 class JsonLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:  # noqa: D401
-        payload: dict[str, Any] = {
-            "ts": _iso_now(),
-            "level": record.levelname.lower(),
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-
-        # Include extra fields if present
-        for attr in ("metadata", "event", "span_id", "parent_id", "duration_ms"):
-            if hasattr(record, attr):
-                payload[attr] = getattr(record, attr)
-
-        # Map custom span_name to public 'name' field in JSON
-        span_name = getattr(record, "span_name", None)
-        if span_name is not None:
-            payload["name"] = span_name
-
-        if "metadata" in payload and isinstance(payload["metadata"], dict):
-            payload["metadata"] = _redact(payload["metadata"])
-
+        payload: dict[str, Any] = _build_base_payload(record)
+        _add_standard_extras(payload, record)
+        _add_span_name(payload, record)
+        _enrich_with_context(payload)
+        _redact_metadata_in_payload(payload)
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -156,3 +188,60 @@ class Metrics:
                 }
             )
         return out
+
+
+# ----------------------------
+# Run context helpers
+# ----------------------------
+
+_run_context_var: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "magent2_run_context", default=None
+)
+
+
+def set_run_context(run_id: str, conversation_id: str, agent: str | None = None) -> None:
+    _run_context_var.set({"run_id": run_id, "conversation_id": conversation_id, "agent": agent})
+
+
+def clear_run_context() -> None:
+    _run_context_var.set(None)
+
+
+def get_run_context() -> dict[str, Any] | None:
+    return _run_context_var.get()
+
+
+@contextmanager
+def use_run_context(
+    run_id: str, conversation_id: str, agent: str | None = None
+) -> Generator[None, None, None]:
+    token = _run_context_var.set(
+        {
+            "run_id": run_id,
+            "conversation_id": conversation_id,
+            "agent": agent,
+        }
+    )
+    try:
+        yield None
+    finally:
+        _run_context_var.reset(token)
+
+
+# ----------------------------
+# Metrics singleton
+# ----------------------------
+
+_metrics_singleton: Metrics | None = None
+
+
+def get_metrics() -> Metrics:
+    global _metrics_singleton
+    if _metrics_singleton is None:
+        _metrics_singleton = Metrics()
+    return _metrics_singleton
+
+
+def reset_metrics() -> None:
+    global _metrics_singleton
+    _metrics_singleton = Metrics()
