@@ -55,7 +55,9 @@ def _docker_available() -> bool:
         return False
     try:
         # Quick check for engine availability
-        proc = subprocess.run([docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        proc = subprocess.run(
+            [docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+        )
         return proc.returncode == 0
     except Exception:
         return False

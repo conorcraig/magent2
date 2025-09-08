@@ -17,7 +17,7 @@ repos:
     rev: v0.5.7
     hooks:
       - id: ruff
-        args: ["--select=E,F,I,UP", "--fix", "--exit-non-zero-on-fix", "--show-fixes"]
+        args: ["--fix", "--exit-non-zero-on-fix", "--show-fixes"]
       - id: ruff-format
 
   - repo: local
