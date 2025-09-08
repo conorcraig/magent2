@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+import uuid
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
+
+
+class SendRequest(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    conversation_id: str
+    sender: str
+    recipient: str
+    type: Literal["message"] = "message"
+    content: str
 
 
 def create_app(bus: Bus) -> FastAPI:
@@ -18,24 +29,25 @@ def create_app(bus: Bus) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/send")
-    async def send(message: dict[str, Any]) -> dict[str, Any]:
-        # Validate minimal shape via required fields
-        try:
-            conversation_id = str(message["conversation_id"])  # noqa: F841
-        except Exception as exc:  # pragma: no cover - defensive
-            raise HTTPException(status_code=400, detail="invalid envelope") from exc
-
+    async def send(message: SendRequest) -> dict[str, Any]:
         # Always publish to conversation topic for compatibility
-        conv_topic = f"chat:{message['conversation_id']}"
-        bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=message))
+        payload = message.model_dump(mode="json")
+        conv_topic = f"chat:{message.conversation_id}"
+        try:
+            bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=payload))
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Additionally publish to agent topic when recipient hints an agent
-        recipient = str(message.get("recipient", ""))
+        recipient = str(message.recipient)
         if recipient.startswith("agent:"):
             agent_name = recipient.split(":", 1)[1] or ""
             if agent_name:
                 agent_topic = f"chat:{agent_name}"
-                bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=message))
+                try:
+                    bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=payload))
+                except Exception as exc:
+                    raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Do not emit a synthetic user_message event here to keep stream ordering predictable
 
@@ -77,5 +89,14 @@ def create_app(bus: Bus) -> FastAPI:
                 await asyncio.sleep(0.02)
 
         return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+    @app.get("/ready")
+    async def ready() -> dict[str, str]:
+        try:
+            # Perform a harmless read on a probe topic to validate connectivity
+            list(bus.read("ready:probe", last_id=None, limit=1))
+            return {"status": "ok"}
+        except Exception as exc:  # pragma: no cover - error path mapping
+            raise HTTPException(status_code=503, detail="bus not ready") from exc
 
     return app

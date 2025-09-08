@@ -68,6 +68,45 @@ async def test_gateway_send_publishes_to_chat_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_send_validation_errors_with_422() -> None:
+    from magent2.gateway.app import create_app
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    # Missing required fields (e.g., recipient)
+    bad_payload = {
+        "id": "abc",
+        "conversation_id": "c1",
+        "sender": "user:alice",
+        # recipient missing
+        "type": "message",
+        "content": "hi",
+    }
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post("/send", json=bad_payload)
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_gateway_ready_endpoint_ok() -> None:
+    from magent2.gateway.app import create_app
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/ready")
+        assert resp.status_code == 200
+        assert resp.json().get("status") == "ok"
+
+
+@pytest.mark.asyncio
 async def test_gateway_stream_relays_sse_events() -> None:
     from magent2.gateway.app import create_app
 
