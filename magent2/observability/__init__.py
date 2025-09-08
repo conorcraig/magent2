@@ -10,6 +10,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+import contextvars
 
 SENSITIVE_KEYS = {"openai_api_key", "api_key", "token", "authorization", "password", "secret"}
 
@@ -46,7 +47,17 @@ class JsonLogFormatter(logging.Formatter):
         }
 
         # Include extra fields if present
-        for attr in ("metadata", "event", "span_id", "parent_id", "duration_ms"):
+        for attr in (
+            "metadata",
+            "event",
+            "span_id",
+            "parent_id",
+            "duration_ms",
+            "run_id",
+            "conversation_id",
+            "agent",
+            "tool",
+        ):
             if hasattr(record, attr):
                 payload[attr] = getattr(record, attr)
 
@@ -54,6 +65,16 @@ class JsonLogFormatter(logging.Formatter):
         span_name = getattr(record, "span_name", None)
         if span_name is not None:
             payload["name"] = span_name
+
+        # Enrich with run context if available and not explicitly set
+        try:
+            ctx = get_run_context()
+        except Exception:
+            ctx = None
+        if isinstance(ctx, dict):
+            for key in ("run_id", "conversation_id", "agent"):
+                if key not in payload and key in ctx and ctx[key] is not None:
+                    payload[key] = ctx[key]
 
         if "metadata" in payload and isinstance(payload["metadata"], dict):
             payload["metadata"] = _redact(payload["metadata"])
@@ -156,3 +177,56 @@ class Metrics:
                 }
             )
         return out
+
+
+# ----------------------------
+# Run context helpers
+# ----------------------------
+
+_run_context_var: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "magent2_run_context", default=None
+)
+
+
+def set_run_context(run_id: str, conversation_id: str, agent: str | None = None) -> None:
+    _run_context_var.set({"run_id": run_id, "conversation_id": conversation_id, "agent": agent})
+
+
+def clear_run_context() -> None:
+    _run_context_var.set(None)
+
+
+def get_run_context() -> dict[str, Any] | None:
+    return _run_context_var.get()
+
+
+@contextmanager
+def use_run_context(run_id: str, conversation_id: str, agent: str | None = None) -> Generator[None, None, None]:
+    token = _run_context_var.set({
+        "run_id": run_id,
+        "conversation_id": conversation_id,
+        "agent": agent,
+    })
+    try:
+        yield None
+    finally:
+        _run_context_var.reset(token)
+
+
+# ----------------------------
+# Metrics singleton
+# ----------------------------
+
+_metrics_singleton: Metrics | None = None
+
+
+def get_metrics() -> Metrics:
+    global _metrics_singleton
+    if _metrics_singleton is None:
+        _metrics_singleton = Metrics()
+    return _metrics_singleton
+
+
+def reset_metrics() -> None:
+    global _metrics_singleton
+    _metrics_singleton = Metrics()

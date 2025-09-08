@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .tool import TerminalTool
+from magent2.observability import get_json_logger, get_metrics, get_run_context
 
 
 @dataclass(slots=True)
@@ -96,6 +97,9 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
     to a compact length suitable for LLM consumption.
     """
     policy = _load_policy_from_env()
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
 
     tool = TerminalTool(
         allowed_commands=policy.allowed_commands,
@@ -104,6 +108,20 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
     )
 
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "terminal.run",
+                "metadata": {
+                    "cwd": cwd or "",
+                    "command": command.split(" ")[0] if command else "",
+                },
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         result: dict[str, Any] = tool.run(command, cwd=cwd)
 
         combined = result.get("stdout", "")
@@ -124,6 +142,17 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         # Convert exceptions into a concise, redacted failure string
         msg = _redact_text(str(exc), policy.redact_substrings, policy.redact_patterns)
         concise_err = msg[: policy.function_output_max_chars]
+        logger.info(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "terminal.run",
+                "metadata": {"error": concise_err[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return "ok=false exit=None timeout=false truncated=false\nerror:\n" + concise_err
 
 
