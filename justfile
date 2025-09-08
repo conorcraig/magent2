@@ -18,6 +18,8 @@ check:
 	# Full local quality gate: lint, types, complexity, secrets, tests
 	@printf "\033[1;36m==> Preparing reports directory\033[0m\n"
 	@mkdir -p reports
+	@printf "\033[1;36m==> Ensuring pre-commit hooks are installed\033[0m\n"
+	@uv run --isolated pre-commit install --install-hooks
 	# Whitespace/EOL auto-fixes across the repo
 	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
 	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
