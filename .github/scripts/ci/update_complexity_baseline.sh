@@ -10,22 +10,39 @@ if [[ -z "${REPO_ROOT}" ]]; then
 fi
 cd "${REPO_ROOT}"
 
-BASELINE_PATH=".baseline-xenon"
-THRESHOLD_AVG="A"
-THRESHOLD_MODS="A"
-THRESHOLD_ABS="B"
+BASELINE_PATH="${BASELINE_PATH:-.baseline-xenon}"
+THRESHOLD_AVG="${THRESHOLD_AVG:-A}"
+THRESHOLD_MODS="${THRESHOLD_MODS:-A}"
+THRESHOLD_ABS="${THRESHOLD_ABS:-B}"
+XENON_PATHS_ENV="${XENON_PATHS-}"
+if [[ -n "${XENON_PATHS_ENV}" ]]; then
+  # shellsplit into array from env var
+  # shellcheck disable=SC2206
+  XENON_PATHS_ARR=( ${XENON_PATHS_ENV} )
+else
+  XENON_PATHS_ARR=( magent2 scripts )
+fi
 
 echo "[update_complexity_baseline] Regenerating (ratchet-down-only) ${BASELINE_PATH}..."
+echo "[update_complexity_baseline] Paths: ${XENON_PATHS_ARR[*]}"
+echo "[update_complexity_baseline] Thresholds: AVG=${THRESHOLD_AVG} MODS=${THRESHOLD_MODS} ABS=${THRESHOLD_ABS}"
 set +e
 OUTPUT="$(uv run --isolated xenon \
   --max-average "${THRESHOLD_AVG}" \
   --max-modules "${THRESHOLD_MODS}" \
   --max-absolute "${THRESHOLD_ABS}" \
   --paths-in-front \
-  magent2 scripts 2>&1)"
+  "${XENON_PATHS_ARR[@]}" 2>&1)"
 set -e
 
 { printf "%s\n" "${OUTPUT}" | grep -E '^ERROR:xenon:' || true; } > "${BASELINE_PATH}.new"
+
+# If baseline does not exist or is empty, initialize it (first-time setup)
+if [[ ! -s "${BASELINE_PATH}" ]]; then
+  mv "${BASELINE_PATH}.new" "${BASELINE_PATH}"
+  echo "[update_complexity_baseline] Initialized baseline at ${BASELINE_PATH}."
+  exit 0
+fi
 
 # Abort if there are new errors not in the baseline (no ratchet up)
 NEW_ADDITIONS=$(comm -13 <(sort -u "${BASELINE_PATH}") <(sort -u "${BASELINE_PATH}.new") || true)

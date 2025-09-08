@@ -11,7 +11,15 @@ if [[ -z "${REPO_ROOT}" ]]; then
 fi
 cd "${REPO_ROOT}"
 
-BASELINE_PATH=".baseline-xenon"
+BASELINE_PATH="${BASELINE_PATH:-.baseline-xenon}"
+XENON_PATHS_ENV="${XENON_PATHS-}"
+if [[ -n "${XENON_PATHS_ENV}" ]]; then
+  # shellsplit into array from env var
+  # shellcheck disable=SC2206
+  XENON_PATHS_ARR=( ${XENON_PATHS_ENV} )
+else
+  XENON_PATHS_ARR=( magent2 scripts )
+fi
 mkdir -p reports
 
 # Allow overrides via environment variables; default to strict thresholds for prod code
@@ -35,9 +43,11 @@ if [[ $# -gt 0 ]]; then
   exit $?
 fi
 
-echo "[complexity_check] Running repo-wide complexity check with baseline ratchet..."
+echo "[complexity_check] Running complexity check with baseline ratchet..."
+echo "[complexity_check] Paths: ${XENON_PATHS_ARR[*]}"
+echo "[complexity_check] Baseline: ${BASELINE_PATH}"
 set +e
-XENON_OUTPUT="$(run_xenon magent2 scripts 2>&1)"
+XENON_OUTPUT="$(run_xenon "${XENON_PATHS_ARR[@]}" 2>&1)"
 XENON_STATUS=$?
 set -e
 
