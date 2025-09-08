@@ -126,7 +126,7 @@ def dyn_instructions(w: RunContextWrapper[AppCtx], agent: AgentBase) -> str:
 research_agent = Agent[AppCtx](
     name="Researcher",
     instructions="You gather up-to-date facts. Cite sources briefly.",
-    tools=[WebSearchTool(max_num_results=5), fetch_internal],
+    tools=[WebSearchTool(), fetch_internal],
     model="gpt-4o-mini",
     model_settings=ModelSettings(temperature=0.2),
     output_type=Answer,
@@ -181,11 +181,12 @@ orchestrator = Agent[AppCtx](
     name="Orchestrator",
     instructions=(
         "You are a project manager. Plan briefly, then either:\n"
-        "1) Collaborate by calling tools (research/math/writer) and "
-        "assemble a final Answer yourself, or\n"
+        "1) Collaborate by calling tools (research/math/writer) and assemble "
+        "a final Answer yourself,\n"
+        "or\n"
         "2) If heavy rewriting is needed, hand off to the Writer.\n"
-        "Always ensure Answer.answer is the final text and "
-        "Answer.sources lists citations when used."
+        "Always ensure Answer.answer is the final text and Answer.sources "
+        "lists citations when used."
     ),
     tools=[research_tool, math_tool, writer_tool],
     handoffs=[handoff_to_writer],
@@ -295,9 +296,12 @@ async def run_with_streaming(
         elif ev.type == "run_item_stream_event":
             it = ev.item
             if it.type == "tool_call_item":
-                print(f"[tool] call -> {it.tool_name}")
+                name = getattr(it, "tool_name", None) or getattr(it, "name", "tool")
+                print(f"[tool] call -> {name}")
             elif it.type == "tool_call_output_item":
-                print(f"[tool] output len={len(it.output)}")
+                out = getattr(it, "output", "")
+                out_len = len(str(out))
+                print(f"[tool] output len={out_len}")
             elif it.type == "message_output_item":
                 text = ItemHelpers.text_message_output(it)
                 if text:
@@ -305,20 +309,20 @@ async def run_with_streaming(
                     print(f"[msg] {short}{'...' if len(text) > 120 else ''}")
 
     print("=== Run finished ===")
-    result = await streamed.get_final_result()
+    result = await streamed.get_final_result()  # type: ignore[attr-defined]
     return result.final_output
 
 
 # ----------------------------
 # Traced workflow
 # ----------------------------
-async def traced_session_demo():
+async def traced_session_demo() -> None:
     ctx = AppCtx(user_id="u-42", prefs={"tone": "precise", "units": "SI"})
     session = SQLiteSession("thread-007", "multi_agent_history.db")
 
     with trace("Multi-agent Q&A", metadata={"user": ctx.user_id}):
         # Custom span: useful to mark UI stages or external calls
-        with custom_span("preflight", metadata={"stage": "init"}):
+        with custom_span("preflight"):
             pass
 
         try:
@@ -337,7 +341,7 @@ async def traced_session_demo():
         except OutputGuardrailTripwireTriggered:
             print("Blocked by output guardrail (missing sources after web use).")
 
-        with custom_span("postprocess", metadata={"stage": "done"}):
+        with custom_span("postprocess"):
             pass
 
 
