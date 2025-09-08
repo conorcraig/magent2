@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-import sys
-import time
-from pathlib import Path
 import shutil
 import subprocess
+import sys
+import time
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import pytest

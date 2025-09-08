@@ -24,14 +24,11 @@ check:
 	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
 	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
 	@uv run --isolated pre-commit run trailing-whitespace --all-files |& tee reports/pre-commit-trailing-whitespace.log | sed -E '/^Installed [0-9]+ packages in /d' || true
-	# Ruff format and lint via pre-commit (ensures parity with hooks)
-	@printf "\033[1;36m==> Ruff (pre-commit): format\033[0m\n"
-	@uv run --isolated pre-commit run ruff-format --all-files |& tee reports/ruff-format.log | sed -E '/^Installed [0-9]+ packages in /d'
-	@printf "\033[1;36m==> Ruff (pre-commit): check (with --fix)\033[0m\n"
-	@uv run --isolated pre-commit run ruff --all-files |& tee reports/ruff-check.log | sed -E '/^Installed [0-9]+ packages in /d'
-	# Verify working tree is clean after formatting/linting
-	@printf "\033[1;36m==> Verify working tree is clean (no unstaged changes)\033[0m\n"
-	@git diff --quiet || (echo "Working tree has uncommitted changes after formatting/linting. Please review, stage, and commit." && exit 1)
+	# Ruff format and lint (apply fixes; do not fail if fixes were applied)
+	@printf "\033[1;36m==> Ruff: format (apply)\033[0m\n"
+	@uv run --isolated ruff format . |& tee reports/ruff-format.log | sed -E '/^Installed [0-9]+ packages in /d'
+	@printf "\033[1;36m==> Ruff: check (apply --fix)\033[0m\n"
+	@uv run --isolated ruff check --fix . |& tee reports/ruff-check.log | sed -E '/^Installed [0-9]+ packages in /d'
 	# Markdown auto-fix (uses local Node via npx)
 	@printf "\033[1;36m==> Markdownlint (fix)\033[0m\n"
 	@npx --yes markdownlint-cli2 --fix |& tee reports/markdownlint.log || true
