@@ -50,15 +50,40 @@ def unique_prefix() -> str:
 
 @lru_cache(maxsize=1)
 def _docker_available() -> bool:
+    """Detect whether Docker engine is available for tests.
+
+    Logic:
+    - Respect explicit override: FORCE_DOCKER_TESTS=1 forces availability.
+    - Require docker CLI to be present in PATH.
+    - Try `docker info` with a generous timeout (engine health).
+    - Fall back to checking the Compose plugin as a weak signal.
+    """
+    if os.environ.get("FORCE_DOCKER_TESTS") == "1":
+        return True
+
     docker = shutil.which("docker")
     if not docker:
         return False
+
     try:
-        # Quick check for engine availability
         proc = subprocess.run(
-            [docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            [docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
         )
-        return proc.returncode == 0
+        if proc.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # Weak fallback: compose plugin present (does not guarantee engine availability).
+    # Useful in some CI setups where `docker info` is slow/flaky.
+    try:
+        proc2 = subprocess.run(
+            [docker, "compose", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return proc2.returncode == 0
     except Exception:
         return False
 
