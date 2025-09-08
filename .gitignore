@@ -26,3 +26,6 @@ reports/
 
 # pr_diffs
 pr_diffs/
+
+# local deps installed during testing
+.pydeps/

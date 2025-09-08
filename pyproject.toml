@@ -16,6 +16,7 @@ dependencies = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = [".git", ".venv", "venv", "node_modules", ".pydeps", "reports"]
 
 [tool.ruff.format]
 quote-style = "double"
