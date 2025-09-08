@@ -14,9 +14,10 @@ cd "${REPO_ROOT}"
 BASELINE_PATH=".baseline-xenon"
 mkdir -p reports
 
-THRESHOLD_AVG="A"
-THRESHOLD_MODS="A"
-THRESHOLD_ABS="B"
+# Allow overrides via environment variables; default to strict thresholds for prod code
+THRESHOLD_AVG="${THRESHOLD_AVG:-A}"
+THRESHOLD_MODS="${THRESHOLD_MODS:-A}"
+THRESHOLD_ABS="${THRESHOLD_ABS:-B}"
 
 run_xenon() {
   uv run --isolated xenon \

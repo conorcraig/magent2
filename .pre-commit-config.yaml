@@ -37,6 +37,14 @@ repos:
         types: [python]
         files: "^(magent2|scripts)/"
 
+      - id: xenon-complexity-tests
+        name: Check Test Complexity (staged, relaxed)
+        language: system
+        entry: bash -c 'THRESHOLD_AVG=B THRESHOLD_MODS=B THRESHOLD_ABS=C .github/scripts/ci/complexity_check.sh "$@"' --
+        pass_filenames: true
+        types: [python]
+        files: "^tests/"
+
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
