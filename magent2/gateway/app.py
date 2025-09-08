@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
 
 
 class SendRequest(BaseModel):
-    id: str
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     conversation_id: str
     sender: str
     recipient: str
