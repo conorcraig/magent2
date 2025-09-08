@@ -11,21 +11,35 @@ if [[ -z "${REPO_ROOT}" ]]; then
 fi
 cd "${REPO_ROOT}"
 
-BASELINE_PATH="${BASELINE_PATH:-.baseline-xenon}"
-XENON_PATHS_ENV="${XENON_PATHS-}"
-if [[ -n "${XENON_PATHS_ENV}" ]]; then
-  # shellsplit into array from env var
-  # shellcheck disable=SC2206
-  XENON_PATHS_ARR=( ${XENON_PATHS_ENV} )
+PROFILE="prod"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--profile)
+      PROFILE="$2"; shift 2 ;;
+    --)
+      shift; break ;;
+    *)
+      break ;;
+  esac
+done
+
+# Profiles define thresholds, baseline path, and default path set
+if [[ "${PROFILE}" == "tests" ]]; then
+  THRESHOLD_AVG="B"
+  THRESHOLD_MODS="B"
+  THRESHOLD_ABS="C"
+  BASELINE_PATH=".baseline-xenon-tests"
+  XENON_PATHS_ARR=( tests )
 else
+  THRESHOLD_AVG="A"
+  THRESHOLD_MODS="A"
+  THRESHOLD_ABS="B"
+  BASELINE_PATH=".baseline-xenon"
   XENON_PATHS_ARR=( magent2 scripts )
 fi
 mkdir -p reports
 
-# Allow overrides via environment variables; default to strict thresholds for prod code
-THRESHOLD_AVG="${THRESHOLD_AVG:-A}"
-THRESHOLD_MODS="${THRESHOLD_MODS:-A}"
-THRESHOLD_ABS="${THRESHOLD_ABS:-B}"
+# thresholds set by profile above
 
 run_xenon() {
   uv run --isolated xenon \
