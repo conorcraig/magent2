@@ -19,7 +19,7 @@ check:
 	@printf "\033[1;36m==> Preparing reports directory\033[0m\n"
 	@mkdir -p reports
 	@printf "\033[1;36m==> Ensuring pre-commit hooks are installed\033[0m\n"
-	@uv run --isolated pre-commit install --install-hooks
+	@bash -lc 'command -v pre-commit >/dev/null 2>&1 || python3 -m pip install --user pre-commit; pre-commit install --install-hooks'
 	# Whitespace/EOL auto-fixes across the repo
 	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
 	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
