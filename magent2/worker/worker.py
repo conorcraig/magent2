@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from typing import Any, Protocol
 
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope
 from magent2.observability import get_json_logger, get_metrics, use_run_context
-import uuid
 
 
 class Runner(Protocol):

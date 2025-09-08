@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .tool import TerminalTool
 from magent2.observability import get_json_logger, get_metrics, get_run_context
+
+from .tool import TerminalTool
 
 
 @dataclass(slots=True)
@@ -120,7 +121,8 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))},
         )
         result: dict[str, Any] = tool.run(command, cwd=cwd)
 
@@ -151,7 +153,8 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))},
         )
         return "ok=false exit=None timeout=false truncated=false\nerror:\n" + concise_err
 

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 import pytest
 
@@ -63,6 +64,18 @@ def test_worker_logs_include_ids_and_counters_increment(capsys: Any) -> None:
     from magent2.worker.worker import Worker
 
     reset_metrics()
+    # Re-bind handler to current stdout so capsys captures logs even if another test
+    # previously initialized the logger before capture began.
+    logger = get_json_logger("magent2")
+    for h in list(logger.handlers):
+        try:
+            logger.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
     logger = get_json_logger("magent2")
     logger.setLevel(20)
 
@@ -105,21 +118,40 @@ def test_worker_logs_include_ids_and_counters_increment(capsys: Any) -> None:
     started = [e for e in snap if e["name"] == "runs_started"]
     completed = [e for e in snap if e["name"] == "runs_completed"]
     assert any(
-        e["labels"].get("conversation_id") == env.conversation_id and e["labels"].get("agent") == "DevAgent"
-        and e["value"] >= 1 for e in started
+        e["labels"].get("conversation_id") == env.conversation_id
+        and e["labels"].get("agent") == "DevAgent"
+        and e["value"] >= 1
+        for e in started
     )
     assert any(
-        e["labels"].get("conversation_id") == env.conversation_id and e["labels"].get("agent") == "DevAgent"
-        and e["value"] >= 1 for e in completed
+        e["labels"].get("conversation_id") == env.conversation_id
+        and e["labels"].get("agent") == "DevAgent"
+        and e["value"] >= 1
+        for e in completed
     )
 
 
-def test_tool_logs_include_ids_and_tool_counters(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+def test_tool_logs_include_ids_and_tool_counters(
+    monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
     # Allow running 'echo' in terminal tool
     monkeypatch.setenv("TERMINAL_ALLOWED_COMMANDS", "echo")
     monkeypatch.setenv("TERMINAL_FUNCTION_OUTPUT_MAX_CHARS", "200")
 
     reset_metrics()
+    # Ensure the tools logger binds a fresh StreamHandler to current stdout
+    tools_logger = get_json_logger("magent2.tools")
+    for h in list(tools_logger.handlers):
+        try:
+            tools_logger.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    tools_logger = get_json_logger("magent2.tools")
+    tools_logger.setLevel(20)
 
     # Establish a run context so logs are enriched
     run_id = str(uuid.uuid4())
@@ -137,6 +169,7 @@ def test_tool_logs_include_ids_and_tool_counters(monkeypatch: pytest.MonkeyPatch
     assert rec.get("run_id") == run_id
 
     snap = get_metrics().snapshot()
-    tool_calls = [e for e in snap if e["name"] == "tool_calls" and e["labels"].get("tool") == "terminal"]
+    tool_calls = [
+        e for e in snap if e["name"] == "tool_calls" and e["labels"].get("tool") == "terminal"
+    ]
     assert tool_calls and tool_calls[0]["value"] >= 1
-
