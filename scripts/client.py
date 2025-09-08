@@ -21,6 +21,7 @@ class ClientConfig:
     conversation_id: str
     agent_name: str
     sender: str
+    log_level: str = "info"
 
 
 class StreamPrinter:
@@ -69,6 +70,25 @@ class StreamPrinter:
         with self._print_lock:
             sys.stdout.write(text)
             sys.stdout.flush()
+
+    def _level_value(self, level: str) -> int:
+        lvl = str(level).lower()
+        if lvl == "debug":
+            return 10
+        if lvl == "info":
+            return 20
+        if lvl in {"warning", "warn"}:
+            return 30
+        if lvl == "error":
+            return 40
+        if lvl in {"critical", "fatal"}:
+            return 50
+        # Default to INFO for unknown levels
+        return 20
+
+    def _is_log_enabled(self, level: str) -> bool:
+        threshold = getattr(self._cfg, "log_level", "info")
+        return self._level_value(level) >= self._level_value(threshold)
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -150,7 +170,10 @@ class StreamPrinter:
         self._println(f"[tool] {name}: {summary_text}")
 
     def _handle_log(self, data: dict[str, Any]) -> None:
-        level = str(data.get("level", "info")).upper()
+        level_raw = str(data.get("level", "info"))
+        if not self._is_log_enabled(level_raw):
+            return
+        level = level_raw.upper()
         component = str(data.get("component", "agent"))
         message = str(data.get("message", ""))
         self._println("")

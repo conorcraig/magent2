@@ -121,6 +121,26 @@ curl -N http://localhost:8000/stream/conv1
 - Pre-commit (staged files): `uv run pre-commit run`
 - Full local quality gate: `just check`
 
+### Non-interactive one-shot mode
+
+Send a single message and exit after the final output:
+
+```bash
+uv run python scripts/client.py \
+  --message "hello" \
+  --conv conv-123 \
+  --agent DevAgent \
+  --sender user:local \
+  --base-url auto \
+  --timeout 60
+```
+
+Notes:
+
+- `--base-url auto` attempts to discover the Gateway port from Docker Compose; falls back to `http://localhost:8000`.
+- Exit code is `0` on success, `2` on timeout.
+- The client renders streamed events including tool steps and `[log][LEVEL] component: message` entries.
+
 ## Todo function tools
 
 Agents SDK function tools backed by a Redis store:
