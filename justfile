@@ -36,6 +36,9 @@ check:
 	# Complexity check (xenon baseline ratchet)
 	@printf "\033[1;36m==> Complexity check (xenon-baseline)\033[0m\n"
 	@bash .github/scripts/ci/complexity_check.sh
+	# Tests complexity (thresholds only, relaxed)
+	@printf "\033[1;36m==> Complexity check (tests, relaxed)\033[0m\n"
+	@THRESHOLD_AVG=B THRESHOLD_MODS=B THRESHOLD_ABS=C bash .github/scripts/ci/complexity_check.sh tests |& tee reports/xenon-tests.txt | sed -E '/^Installed [0-9]+ packages in /d'
 	# Validate secrets against baseline using pre-commit hook across tracked files (excluding baselines)
 	@printf "\033[1;36m==> Secrets scan (detect-secrets pre-commit hook)\033[0m\n"
 	@bash -c 'FILES=$(git ls-files | grep -v "^\\.baseline-"); uv run --isolated python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES' |& tee reports/detect-secrets.log | sed -E '/^Installed [0-9]+ packages in /d'
