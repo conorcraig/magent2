@@ -24,7 +24,7 @@ check:
 	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
 	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
 	@uv run --isolated pre-commit run trailing-whitespace --all-files |& tee reports/pre-commit-trailing-whitespace.log | sed -E '/^Installed [0-9]+ packages in /d' || true
-	# Ruff format and lint (apply fixes; do not fail if fixes were applied)
+	# Ruff format and lint via uv (single source of truth: pyproject.toml)
 	@printf "\033[1;36m==> Ruff: format (apply)\033[0m\n"
 	@uv run --isolated ruff format . |& tee reports/ruff-format.log | sed -E '/^Installed [0-9]+ packages in /d'
 	@printf "\033[1;36m==> Ruff: check (apply --fix)\033[0m\n"
