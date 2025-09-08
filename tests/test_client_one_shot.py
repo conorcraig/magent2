@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import pytest
 
@@ -12,15 +12,14 @@ class _FakeResponse:
         self._lines = list(lines)
         self.status_code = status_code
 
-    def __enter__(self) -> "_FakeResponse":  # noqa: D401 - context manager enter
+    def __enter__(self) -> _FakeResponse:  # noqa: D401 - context manager enter
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:  # noqa: D401 - context manager exit
         return None
 
     def iter_lines(self) -> Iterable[str]:
-        for line in self._lines:
-            yield line
+        yield from self._lines
 
 
 def _sse_line(payload: dict[str, Any]) -> str:
@@ -29,8 +28,8 @@ def _sse_line(payload: dict[str, Any]) -> str:
 
 def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     # Import locally to access the same module objects for monkeypatching
-    from scripts.client import ClientConfig, one_shot
     import scripts.client as client_mod
+    from scripts.client import ClientConfig, one_shot
 
     created_late = "9999-01-01T00:00:00+00:00"
 
@@ -38,7 +37,14 @@ def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     lines = [
         _sse_line({"event": "token", "text": "Hel", "created_at": created_late}),
         _sse_line({"event": "token", "text": "lo", "created_at": created_late}),
-        _sse_line({"event": "tool_step", "name": "dummy", "result_summary": "ok", "created_at": created_late}),
+        _sse_line(
+            {
+                "event": "tool_step",
+                "name": "dummy",
+                "result_summary": "ok",
+                "created_at": created_late,
+            }
+        ),
         _sse_line({"event": "output", "text": "Hello", "created_at": created_late}),
     ]
 
@@ -80,8 +86,8 @@ def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
 
 
 def test_one_shot_timeout(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
-    from scripts.client import ClientConfig, one_shot
     import scripts.client as client_mod
+    from scripts.client import ClientConfig, one_shot
 
     created_late = "9999-01-01T00:00:00+00:00"
 
