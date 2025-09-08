@@ -271,6 +271,42 @@ public_entry = Agent[AppCtx](
 # ----------------------------
 # Streaming helper
 # ----------------------------
+def _handle_agent_updated_event(upd: AgentUpdatedStreamEvent) -> None:
+    print(f"[agent] now={upd.new_agent.name}")
+
+
+def _print_tool_call_item(it: Any) -> None:
+    name = getattr(it, "tool_name", None) or getattr(it, "name", "tool")
+    print(f"[tool] call -> {name}")
+
+
+def _print_tool_call_output_item(it: Any) -> None:
+    out = getattr(it, "output", "")
+    out_len = len(str(out))
+    print(f"[tool] output len={out_len}")
+
+
+def _print_message_output_item(it: Any) -> None:
+    text = ItemHelpers.text_message_output(it)
+    if not text:
+        return
+    short = text[:120].replace("\n", " ")
+    suffix = "..." if len(text) > 120 else ""
+    print(f"[msg] {short}{suffix}")
+
+
+def _handle_run_item_stream_event(ev: Any) -> None:
+    it = ev.item
+    dispatch = {
+        "tool_call_item": _print_tool_call_item,
+        "tool_call_output_item": _print_tool_call_output_item,
+        "message_output_item": _print_message_output_item,
+    }
+    handler = dispatch.get(getattr(it, "type", ""))
+    if handler:
+        handler(it)
+
+
 async def run_with_streaming(
     agent: Agent[AppCtx], user_input: str, ctx: AppCtx, session: SQLiteSession | None = None
 ) -> Answer:
@@ -287,26 +323,16 @@ async def run_with_streaming(
 
     print("=== Run started ===")
     async for ev in streamed.stream_events():
-        if ev.type == "raw_response_event":
+        ev_type = getattr(ev, "type", "")
+        if ev_type == "raw_response_event":
             # omit token-level printing in this demo to keep stdout clean
             continue
-        elif ev.type == "agent_updated_stream_event":
-            upd: AgentUpdatedStreamEvent = ev
-            print(f"[agent] now={upd.new_agent.name}")
-        elif ev.type == "run_item_stream_event":
-            it = ev.item
-            if it.type == "tool_call_item":
-                name = getattr(it, "tool_name", None) or getattr(it, "name", "tool")
-                print(f"[tool] call -> {name}")
-            elif it.type == "tool_call_output_item":
-                out = getattr(it, "output", "")
-                out_len = len(str(out))
-                print(f"[tool] output len={out_len}")
-            elif it.type == "message_output_item":
-                text = ItemHelpers.text_message_output(it)
-                if text:
-                    short = text[:120].replace("\n", " ")
-                    print(f"[msg] {short}{'...' if len(text) > 120 else ''}")
+        if ev_type == "agent_updated_stream_event":
+            _handle_agent_updated_event(ev)  # type: ignore[arg-type]
+            continue
+        if ev_type == "run_item_stream_event":
+            _handle_run_item_stream_event(ev)
+            continue
 
     print("=== Run finished ===")
     result = await streamed.get_final_result()  # type: ignore[attr-defined]
