@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -22,7 +21,7 @@ def test_sandbox_cwd_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     outside.mkdir()
     (sandbox / "file.txt").write_text("hi")
     monkeypatch.setenv("TERMINAL_SANDBOX_CWD", str(sandbox))
-    tool = TerminalTool(allowed_commands=["bash", "cat", "echo"]) 
+    tool = TerminalTool(allowed_commands=["bash", "cat", "echo"])
 
     # Default cwd should be sandbox root
     result = tool.run("bash -lc 'pwd' ")
@@ -44,10 +43,9 @@ def test_sandbox_cwd_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_redaction_of_secrets(tmp_path: Path) -> None:
-    tool = TerminalTool(allowed_commands=["bash"]) 
+    tool = TerminalTool(allowed_commands=["bash"])
     fake_secret = "sk-abc1234567890"
     result = tool.run(f"bash -lc 'echo {fake_secret} && echo {fake_secret} 1>&2'")
     assert result["ok"] is True
     assert fake_secret not in result["stdout"]
     assert "[REDACTED]" in result["stdout"]
-

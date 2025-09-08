@@ -5,9 +5,10 @@ import re
 import shlex
 import signal
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
-from typing import Any, Iterable
+from typing import Any
 
 
 def _truncate_to_bytes(text: str, limit_bytes: int) -> tuple[str, bool]:
@@ -56,7 +57,9 @@ class TerminalTool:
         )
         env_sandbox = os.getenv("TERMINAL_SANDBOX_CWD")
         self._sandbox_root: Path | None = (
-            Path(sandbox_cwd).resolve() if sandbox_cwd is not None else (Path(env_sandbox).resolve() if env_sandbox else None)
+            Path(sandbox_cwd).resolve()
+            if sandbox_cwd is not None
+            else (Path(env_sandbox).resolve() if env_sandbox else None)
         )
 
     def _sanitize_env(self) -> dict[str, str]:
@@ -120,7 +123,7 @@ class TerminalTool:
         secret_patterns: list[re.Pattern[str]] = [
             re.compile(r"sk-[A-Za-z0-9]{6,}"),
         ]
-        for pat in (patterns or secret_patterns):
+        for pat in patterns or secret_patterns:
             text = pat.sub("[REDACTED]", text)
         return text
 
