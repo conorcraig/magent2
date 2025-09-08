@@ -1,6 +1,6 @@
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 import pytest
 
@@ -133,4 +133,3 @@ def test_one_shot_timeout_exit_code_nonzero(monkeypatch):
 
     code = one_shot(cfg, "hello", timeout=0.1)
     assert code == 2
-
