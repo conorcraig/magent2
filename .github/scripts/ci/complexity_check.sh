@@ -11,12 +11,35 @@ if [[ -z "${REPO_ROOT}" ]]; then
 fi
 cd "${REPO_ROOT}"
 
-BASELINE_PATH=".baseline-xenon"
+PROFILE="prod"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--profile)
+      PROFILE="$2"; shift 2 ;;
+    --)
+      shift; break ;;
+    *)
+      break ;;
+  esac
+done
+
+# Profiles define thresholds, baseline path, and default path set
+if [[ "${PROFILE}" == "tests" ]]; then
+  THRESHOLD_AVG="B"
+  THRESHOLD_MODS="B"
+  THRESHOLD_ABS="C"
+  BASELINE_PATH=".baseline-xenon-tests"
+  XENON_PATHS_ARR=( tests )
+else
+  THRESHOLD_AVG="A"
+  THRESHOLD_MODS="A"
+  THRESHOLD_ABS="B"
+  BASELINE_PATH=".baseline-xenon"
+  XENON_PATHS_ARR=( magent2 scripts )
+fi
 mkdir -p reports
 
-THRESHOLD_AVG="A"
-THRESHOLD_MODS="A"
-THRESHOLD_ABS="B"
+# thresholds set by profile above
 
 run_xenon() {
   uv run --isolated xenon \
@@ -34,9 +57,11 @@ if [[ $# -gt 0 ]]; then
   exit $?
 fi
 
-echo "[complexity_check] Running repo-wide complexity check with baseline ratchet..."
+echo "[complexity_check] Running complexity check with baseline ratchet..."
+echo "[complexity_check] Paths: ${XENON_PATHS_ARR[*]}"
+echo "[complexity_check] Baseline: ${BASELINE_PATH}"
 set +e
-XENON_OUTPUT="$(run_xenon magent2 scripts 2>&1)"
+XENON_OUTPUT="$(run_xenon "${XENON_PATHS_ARR[@]}" 2>&1)"
 XENON_STATUS=$?
 set -e
 

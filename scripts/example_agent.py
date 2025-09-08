@@ -19,37 +19,37 @@ Notes:
 """
 
 from __future__ import annotations
-import asyncio
-import os
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+import asyncio
+from dataclasses import dataclass, field
+from typing import Any
 
 from agents import (
     Agent,
     AgentBase,
     AgentUpdatedStreamEvent,
-    ItemHelpers,
-    ModelSettings,
-    Runner,
-    RunConfig,
-    RunContextWrapper,
-    SQLiteSession,
-    StreamEvent,
-    TResponseInputItem,
-    WebSearchTool,
-    function_tool,
     # Guardrails
     GuardrailFunctionOutput,
+    InputGuardrailTripwireTriggered,
+    ItemHelpers,
+    ModelSettings,
+    OutputGuardrailTripwireTriggered,
+    RunConfig,
+    RunContextWrapper,
+    Runner,
+    SQLiteSession,
+    TResponseInputItem,
+    WebSearchTool,
+    custom_span,
+    function_tool,
+    handoff,
     input_guardrail,
     output_guardrail,
-    InputGuardrailTripwireTriggered,
-    OutputGuardrailTripwireTriggered,
     # Tracing
     trace,
-    custom_span,
 )
+from pydantic import BaseModel, Field
+
 
 # ----------------------------
 # Local context (never sent to LLM)
@@ -57,24 +57,27 @@ from agents import (
 @dataclass
 class AppCtx:
     user_id: str
-    prefs: Dict[str, Any] = field(default_factory=lambda: {"tone": "concise", "units": "SI"})
-    domain_docs: Dict[str, str] = field(
+    prefs: dict[str, Any] = field(default_factory=lambda: {"tone": "concise", "units": "SI"})
+    domain_docs: dict[str, str] = field(
         default_factory=lambda: {
             "battery_safety": "Keep cells 20–30°C in formation. Never exceed 60°C surface temp.",
             "gd_tolerancing": "Use datums; MMC modifiers sparingly; verify with CMM.",
         }
     )
 
+
 # ----------------------------
 # Typed outputs
 # ----------------------------
 class Answer(BaseModel):
     answer: str
-    sources: List[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+
 
 class TriagedTask(BaseModel):
     route: str
     reason: str
+
 
 # ----------------------------
 # Tools
@@ -83,6 +86,7 @@ class TriagedTask(BaseModel):
 def get_pref(w: RunContextWrapper[AppCtx], key: str) -> str:
     """Return a preference from local context."""
     return str(w.context.prefs.get(key, ""))
+
 
 @function_tool
 def fetch_internal(w: RunContextWrapper[AppCtx], query: str) -> str:
@@ -93,10 +97,12 @@ def fetch_internal(w: RunContextWrapper[AppCtx], query: str) -> str:
             return f"[{k}] {v}"
     return "no match"
 
+
 @function_tool
 def add(a: int, b: int) -> int:
     """Return a+b."""
     return a + b
+
 
 # ----------------------------
 # Dynamic system instructions
@@ -112,6 +118,7 @@ def dyn_instructions(w: RunContextWrapper[AppCtx], agent: AgentBase) -> str:
         "- When possible, emit output in the Answer schema."
     )
 
+
 # ----------------------------
 # Specialist agents
 # ----------------------------
@@ -119,7 +126,7 @@ def dyn_instructions(w: RunContextWrapper[AppCtx], agent: AgentBase) -> str:
 research_agent = Agent[AppCtx](
     name="Researcher",
     instructions="You gather up-to-date facts. Cite sources briefly.",
-    tools=[WebSearchTool(max_num_results=5), fetch_internal],
+    tools=[WebSearchTool(), fetch_internal],
     model="gpt-4o-mini",
     model_settings=ModelSettings(temperature=0.2),
     output_type=Answer,
@@ -168,16 +175,18 @@ writer_tool = writer_agent.as_tool(
 )
 
 # Handoffs (delegation/ownership transfer)
-from agents import handoff
 handoff_to_writer = handoff(writer_agent)
 
 orchestrator = Agent[AppCtx](
     name="Orchestrator",
     instructions=(
         "You are a project manager. Plan briefly, then either:\n"
-        "1) Collaborate by calling tools (research/math/writer) and assemble a final Answer yourself, or\n"
+        "1) Collaborate by calling tools (research/math/writer) and assemble "
+        "a final Answer yourself,\n"
+        "or\n"
         "2) If heavy rewriting is needed, hand off to the Writer.\n"
-        "Always ensure Answer.answer is the final text and Answer.sources lists citations when used."
+        "Always ensure Answer.answer is the final text and Answer.sources "
+        "lists citations when used."
     ),
     tools=[research_tool, math_tool, writer_tool],
     handoffs=[handoff_to_writer],
@@ -185,6 +194,7 @@ orchestrator = Agent[AppCtx](
     model_settings=ModelSettings(temperature=0.2),
     output_type=Answer,
 )
+
 
 # ----------------------------
 # Guardrails
@@ -195,6 +205,7 @@ class HWCheck(BaseModel):
     is_homework: bool
     reason: str
 
+
 guardrail_classifier = Agent(
     name="Guardrail classifier",
     instructions="Determine if the user is asking to do homework. Be strict. Return JSON.",
@@ -203,15 +214,22 @@ guardrail_classifier = Agent(
     model_settings=ModelSettings(temperature=0),
 )
 
+
 @input_guardrail
-async def no_homework(w: RunContextWrapper[AppCtx], agent: AgentBase, input: str | List[TResponseInputItem]) -> GuardrailFunctionOutput:
+async def no_homework(
+    w: RunContextWrapper[AppCtx], agent: AgentBase, input: str | list[TResponseInputItem]
+) -> GuardrailFunctionOutput:
     res = await Runner.run(guardrail_classifier, input, context=w.context)
-    return GuardrailFunctionOutput(output_info=res.final_output, tripwire_triggered=res.final_output.is_homework)
+    return GuardrailFunctionOutput(
+        output_info=res.final_output, tripwire_triggered=res.final_output.is_homework
+    )
+
 
 class OutputCheck(BaseModel):
     used_web: bool
     has_sources: bool
     reasoning: str
+
 
 output_checker = Agent(
     name="Output checker",
@@ -224,12 +242,17 @@ output_checker = Agent(
     model_settings=ModelSettings(temperature=0),
 )
 
+
 @output_guardrail
-async def require_sources_if_web(w: RunContextWrapper[AppCtx], agent: AgentBase, output: Answer) -> GuardrailFunctionOutput:
-    msg = f"ANSWER: {output.answer}\nSOURCES: {', '.join(output.sources) if output.sources else '(none)'}"
+async def require_sources_if_web(
+    w: RunContextWrapper[AppCtx], agent: AgentBase, output: Answer
+) -> GuardrailFunctionOutput:
+    sources_str = ", ".join(output.sources) if output.sources else "(none)"
+    msg = f"ANSWER: {output.answer}\nSOURCES: {sources_str}"
     res = await Runner.run(output_checker, msg, context=w.context)
     trip = res.final_output.used_web and not res.final_output.has_sources
     return GuardrailFunctionOutput(output_info=res.final_output, tripwire_triggered=trip)
+
 
 # Attach guardrails to the public-entry agent
 public_entry = Agent[AppCtx](
@@ -244,10 +267,13 @@ public_entry = Agent[AppCtx](
     output_type=Answer,
 )
 
+
 # ----------------------------
 # Streaming helper
 # ----------------------------
-async def run_with_streaming(agent: Agent[AppCtx], user_input: str, ctx: AppCtx, session: Optional[SQLiteSession] = None) -> Answer:
+async def run_with_streaming(
+    agent: Agent[AppCtx], user_input: str, ctx: AppCtx, session: SQLiteSession | None = None
+) -> Answer:
     """
     Start a streamed run and print high-level progress events.
     Return the final Answer.
@@ -255,7 +281,9 @@ async def run_with_streaming(agent: Agent[AppCtx], user_input: str, ctx: AppCtx,
     # Optional: tighten tracing for this run
     run_config = RunConfig(tracing_disabled=False, trace_include_sensitive_data=False)
 
-    streamed = Runner.run_streamed(agent, input=user_input, context=ctx, session=session, run_config=run_config)
+    streamed = Runner.run_streamed(
+        agent, input=user_input, context=ctx, session=session, run_config=run_config
+    )
 
     print("=== Run started ===")
     async for ev in streamed.stream_events():
@@ -268,35 +296,42 @@ async def run_with_streaming(agent: Agent[AppCtx], user_input: str, ctx: AppCtx,
         elif ev.type == "run_item_stream_event":
             it = ev.item
             if it.type == "tool_call_item":
-                print(f"[tool] call -> {it.tool_name}")
+                name = getattr(it, "tool_name", None) or getattr(it, "name", "tool")
+                print(f"[tool] call -> {name}")
             elif it.type == "tool_call_output_item":
-                print(f"[tool] output len={len(it.output)}")
+                out = getattr(it, "output", "")
+                out_len = len(str(out))
+                print(f"[tool] output len={out_len}")
             elif it.type == "message_output_item":
                 text = ItemHelpers.text_message_output(it)
                 if text:
                     short = text[:120].replace("\n", " ")
-                    print(f"[msg] {short}{'...' if len(text)>120 else ''}")
+                    print(f"[msg] {short}{'...' if len(text) > 120 else ''}")
 
     print("=== Run finished ===")
-    result = await streamed.get_final_result()
+    result = await streamed.get_final_result()  # type: ignore[attr-defined]
     return result.final_output
+
 
 # ----------------------------
 # Traced workflow
 # ----------------------------
-async def traced_session_demo():
+async def traced_session_demo() -> None:
     ctx = AppCtx(user_id="u-42", prefs={"tone": "precise", "units": "SI"})
     session = SQLiteSession("thread-007", "multi_agent_history.db")
 
-    with trace("Multi-agent Q&A", metadata={"user": ctx.user_id}) as tr:
+    with trace("Multi-agent Q&A", metadata={"user": ctx.user_id}):
         # Custom span: useful to mark UI stages or external calls
-        with custom_span("preflight", metadata={"stage": "init"}):
+        with custom_span("preflight"):
             pass
 
         try:
             ans = await run_with_streaming(
                 public_entry,
-                "Compare LFP vs NMC cycle-life at fast charge using recent sources. Give a short, engineer-ready answer.",
+                (
+                    "Compare LFP vs NMC cycle-life at fast charge using recent sources. "
+                    "Give a short, engineer-ready answer."
+                ),
                 ctx,
                 session=session,
             )
@@ -306,8 +341,9 @@ async def traced_session_demo():
         except OutputGuardrailTripwireTriggered:
             print("Blocked by output guardrail (missing sources after web use).")
 
-        with custom_span("postprocess", metadata={"stage": "done"}):
+        with custom_span("postprocess"):
             pass
+
 
 # ----------------------------
 # Entrypoint
@@ -316,4 +352,3 @@ if __name__ == "__main__":
     # Optional: set OPENAI_AGENTS_DISABLE_TRACING=1 to disable default tracing.
     # For demo purposes, just run once.
     asyncio.run(traced_session_demo())
-```0

@@ -18,14 +18,16 @@ check:
 	# Full local quality gate: lint, types, complexity, secrets, tests
 	@printf "\033[1;36m==> Preparing reports directory\033[0m\n"
 	@mkdir -p reports
+	@printf "\033[1;36m==> Ensuring pre-commit hooks are installed\033[0m\n"
+	@uv run --isolated pre-commit install --install-hooks || true
 	# Whitespace/EOL auto-fixes across the repo
 	@printf "\033[1;36m==> Whitespace/EOL auto-fixes (pre-commit)\033[0m\n"
 	@uv run --isolated pre-commit run end-of-file-fixer --all-files |& tee reports/pre-commit-end-of-file-fixer.log | sed -E '/^Installed [0-9]+ packages in /d' || true
 	@uv run --isolated pre-commit run trailing-whitespace --all-files |& tee reports/pre-commit-trailing-whitespace.log | sed -E '/^Installed [0-9]+ packages in /d' || true
-	# Ruff format and lint (with fixes) with logs
-	@printf "\033[1;36m==> Ruff: format\033[0m\n"
+	# Ruff format and lint via uv (single source of truth: pyproject.toml)
+	@printf "\033[1;36m==> Ruff: format (apply)\033[0m\n"
 	@uv run --isolated ruff format . |& tee reports/ruff-format.log | sed -E '/^Installed [0-9]+ packages in /d'
-	@printf "\033[1;36m==> Ruff: check (with --fix)\033[0m\n"
+	@printf "\033[1;36m==> Ruff: check (apply --fix)\033[0m\n"
 	@uv run --isolated ruff check --fix . |& tee reports/ruff-check.log | sed -E '/^Installed [0-9]+ packages in /d'
 	# Markdown auto-fix (uses local Node via npx)
 	@printf "\033[1;36m==> Markdownlint (fix)\033[0m\n"
@@ -35,7 +37,10 @@ check:
 	@bash .github/scripts/ci/type_check.sh
 	# Complexity check (xenon baseline ratchet)
 	@printf "\033[1;36m==> Complexity check (xenon-baseline)\033[0m\n"
-	@bash .github/scripts/ci/complexity_check.sh
+	@bash .github/scripts/ci/complexity_check.sh --profile prod
+	# Tests complexity (thresholds only, relaxed)
+	@printf "\033[1;36m==> Complexity check (tests, relaxed)\033[0m\n"
+	@bash .github/scripts/ci/complexity_check.sh --profile tests |& tee reports/xenon-tests.txt | sed -E '/^Installed [0-9]+ packages in /d'
 	# Validate secrets against baseline using pre-commit hook across tracked files (excluding baselines)
 	@printf "\033[1;36m==> Secrets scan (detect-secrets pre-commit hook)\033[0m\n"
 	@bash -c 'FILES=$(git ls-files | grep -v "^\\.baseline-"); uv run --isolated python -m detect_secrets.pre_commit_hook --baseline .baseline-secrets -- $FILES' |& tee reports/detect-secrets.log | sed -E '/^Installed [0-9]+ packages in /d'
@@ -46,7 +51,10 @@ check:
 update:
 	# Update all baselines in one go
 	bash .github/scripts/ci/update_type_baseline.sh
-	bash .github/scripts/ci/update_complexity_baseline.sh
+	# Production complexity baseline (magent2 + scripts)
+	bash .github/scripts/ci/update_complexity_baseline.sh --profile prod
+	# Tests complexity baseline (tests only, relaxed thresholds)
+	bash .github/scripts/ci/update_complexity_baseline.sh --profile tests
 	uv run --isolated detect-secrets scan --exclude-files '^\\.baseline-.*$' > .baseline-secrets
 
 test:

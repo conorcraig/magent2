@@ -20,8 +20,10 @@ jobs:
         run: uv sync --frozen --group dev
       - name: Ruff format (check)
         run: uv run ruff format --check .
-      - name: Ruff lint
+      - name: Ruff lint (pyproject single source of truth)
         run: uv run ruff check --output-format=github .
+      - name: Tests complexity (xenon baseline, tests profile)
+        run: bash .github/scripts/ci/complexity_check.sh --profile tests
       - name: Type check (mypy + baseline ratchet)
         run: bash .github/scripts/ci/type_check.sh
       - name: Complexity check (xenon + baseline ratchet)
