@@ -11,16 +11,17 @@ from pydantic import BaseModel
 from magent2.bus.interface import Bus, BusMessage
 
 
+class SendRequest(BaseModel):
+    id: str
+    conversation_id: str
+    sender: str
+    recipient: str
+    type: Literal["message"] = "message"
+    content: str
+
+
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
-
-    class SendRequest(BaseModel):
-        id: str
-        conversation_id: str
-        sender: str
-        recipient: str
-        type: Literal["message"] = "message"
-        content: str
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
