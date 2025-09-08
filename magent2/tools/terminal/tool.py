@@ -95,49 +95,41 @@ class TerminalTool:
                 raise PermissionError(f"Command '{cmd}' is denied by policy")
 
     def _resolve_working_dir(self, cwd: str | None) -> str | None:
-        # Enforce sandbox when configured
+        # No sandbox configured → pass-through or None
         if self._sandbox_root is None:
-            if cwd is None:
-                return None
-            return str(Path(cwd))
+            return None if cwd is None else str(Path(cwd))
 
         sandbox_root = self._sandbox_root
         assert sandbox_root is not None
 
-        if cwd is None or str(cwd).strip() == "":
-            resolved = sandbox_root
-        else:
-            given = Path(cwd)
-            candidate = given.resolve() if given.is_absolute() else (sandbox_root / given).resolve()
-            # Ensure candidate is under sandbox_root
-            try:
-                _ = candidate.relative_to(sandbox_root)
-            except Exception:
-                raise PermissionError("Working directory escapes sandbox root")
-            resolved = candidate
+        # Default to sandbox root when cwd is empty
+        if cwd is None or not str(cwd).strip():
+            return str(sandbox_root)
 
-        return str(resolved)
+        given = Path(cwd)
+        candidate = given.resolve() if given.is_absolute() else (sandbox_root / given).resolve()
+        # Ensure candidate is under sandbox_root
+        try:
+            _ = candidate.relative_to(sandbox_root)
+        except Exception:
+            raise PermissionError("Working directory escapes sandbox root")
+        return str(candidate)
 
     @staticmethod
-    def _redact_output(text: str, patterns: Iterable[re.Pattern[str]] | None = None) -> str:
-        secret_patterns: list[re.Pattern[str]] = [
-            re.compile(r"sk-[A-Za-z0-9]{6,}"),
-        ]
-        for pat in patterns or secret_patterns:
-            text = pat.sub("[REDACTED]", text)
-        return text
+    def _combine_streams(stdout: str | None, stderr: str | None) -> str:
+        if not stdout and not stderr:
+            return ""
+        if not stderr:
+            return stdout or ""
+        if not stdout:
+            return stderr or ""
+        if stdout.endswith("\n"):
+            return f"{stdout}{stderr}"
+        return f"{stdout}\n{stderr}"
 
-    def run(self, command: str, cwd: str | None = None) -> dict[str, Any]:
-        self._assert_not_denied(command)
-        self._assert_allowed(command)
-
-        working_dir = self._resolve_working_dir(cwd)
-
-        env = self._sanitize_env()
-
-        # Build argv for Popen without invoking a shell
-        argv = shlex.split(command)
-
+    def _execute_command(
+        self, argv: list[str], working_dir: str | None, env: dict[str, str]
+    ) -> tuple[str, str, int, bool, int]:
         start = time.monotonic()
         proc = Popen(
             argv,
@@ -162,21 +154,41 @@ class TerminalTool:
             stdout, stderr = proc.communicate()
 
         duration_ms = int((time.monotonic() - start) * 1000)
+        return stdout or "", stderr or "", proc.returncode, timeout, duration_ms
 
-        combined = stdout or ""
-        if stderr:
-            if combined and not combined.endswith("\n"):
-                combined += "\n"
-            combined += stderr
+    @staticmethod
+    def _redact_output(text: str, patterns: Iterable[re.Pattern[str]] | None = None) -> str:
+        secret_patterns: list[re.Pattern[str]] = [
+            re.compile(r"sk-[A-Za-z0-9]{6,}"),
+        ]
+        for pat in patterns or secret_patterns:
+            text = pat.sub("[REDACTED]", text)
+        return text
 
+    def run(self, command: str, cwd: str | None = None) -> dict[str, Any]:
+        self._assert_not_denied(command)
+        self._assert_allowed(command)
+
+        working_dir = self._resolve_working_dir(cwd)
+
+        env = self._sanitize_env()
+
+        # Build argv for Popen without invoking a shell
+        argv = shlex.split(command)
+
+        stdout, stderr, exit_code, did_timeout, duration_ms = self._execute_command(
+            argv, working_dir, env
+        )
+
+        combined = self._combine_streams(stdout, stderr)
         # Redact sensitive tokens prior to truncation
         redacted = self._redact_output(combined)
         out_text, was_truncated = _truncate_to_bytes(redacted, self.output_cap_bytes)
 
         result: dict[str, Any] = {
-            "ok": (proc.returncode == 0) and not timeout,
-            "exit_code": proc.returncode,
-            "timeout": timeout,
+            "ok": (exit_code == 0) and not did_timeout,
+            "exit_code": exit_code,
+            "timeout": did_timeout,
             "stdout": out_text,
             "truncated": was_truncated,
             "duration_ms": duration_ms,

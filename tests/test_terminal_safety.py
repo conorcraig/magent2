@@ -44,7 +44,7 @@ def test_sandbox_cwd_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def test_redaction_of_secrets(tmp_path: Path) -> None:
     tool = TerminalTool(allowed_commands=["bash"])
-    fake_secret = "sk-abc1234567890"
+    fake_secret = "sk-abc1234567890"  # pragma: allowlist secret
     result = tool.run(f"bash -lc 'echo {fake_secret} && echo {fake_secret} 1>&2'")
     assert result["ok"] is True
     assert fake_secret not in result["stdout"]
