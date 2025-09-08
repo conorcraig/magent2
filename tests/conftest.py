@@ -50,13 +50,23 @@ def unique_prefix() -> str:
 
 @lru_cache(maxsize=1)
 def _docker_available() -> bool:
+    """Basic Docker health check.
+
+    Standard practice: ensure `docker` CLI exists and `docker ps` succeeds.
+    """
+    if os.environ.get("FORCE_DOCKER_TESTS") == "1":
+        return True
+
     docker = shutil.which("docker")
     if not docker:
         return False
+
     try:
-        # Quick check for engine availability
         proc = subprocess.run(
-            [docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            [docker, "ps", "-q"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
         )
         return proc.returncode == 0
     except Exception:

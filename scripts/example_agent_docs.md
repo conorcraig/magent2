@@ -79,26 +79,26 @@ The SDK supports tracing for observability. You can:
 Tracing can be disabled globally or per-run.
 
 ## How to Extend Safely
-1. **Adding new tools**: Define with `@function_tool` and include them in an agent's tools list.  
-2. **Adding new agents**: Create specialized agents with their own instructions and tools. Decide whether to expose them via agents-as-tools or handoffs.  
-3. **Modifying context**: Extend `AppCtx` dataclass with new fields. Remember this is private state.  
-4. **Modifying memory**: Switch to `SQLAlchemySession` for multi-user scale or `OpenAIConversationsSession` for hosted storage.  
-5. **Adjusting output schemas**: Use Pydantic models to enforce structure. Ensure tools and instructions support producing this structure.  
-6. **Extending guardrails**: Write new guardrail agents to enforce domain-specific rules.  
+1. **Adding new tools**: Define with `@function_tool` and include them in an agent's tools list.
+2. **Adding new agents**: Create specialized agents with their own instructions and tools. Decide whether to expose them via agents-as-tools or handoffs.
+3. **Modifying context**: Extend `AppCtx` dataclass with new fields. Remember this is private state.
+4. **Modifying memory**: Switch to `SQLAlchemySession` for multi-user scale or `OpenAIConversationsSession` for hosted storage.
+5. **Adjusting output schemas**: Use Pydantic models to enforce structure. Ensure tools and instructions support producing this structure.
+6. **Extending guardrails**: Write new guardrail agents to enforce domain-specific rules.
 7. **UI integration**: Use `run_streamed` and consume StreamEvents to update your frontend incrementally.
 
 ## Common Pitfalls
-- Do not put secrets into instructions; keep them in local context.  
-- Remember only conversation history is visible to the LLM.  
-- If you extend context, tools must explicitly access it; the model cannot.  
-- Guardrail tripwire exceptions must be caught and handled in your app.  
+- Do not put secrets into instructions; keep them in local context.
+- Remember only conversation history is visible to the LLM.
+- If you extend context, tools must explicitly access it; the model cannot.
+- Guardrail tripwire exceptions must be caught and handled in your app.
 - Streaming requires async iteration; forgetting to `await get_final_result` will drop the final output.
 
 ## References
-OpenAI Agents SDK Docs:  
-- Overview: https://openai.github.io/openai-agents-python/  
-- Running Agents: https://openai.github.io/openai-agents-python/running_agents/  
-- Sessions: https://openai.github.io/openai-agents-python/sessions/  
-- Guardrails: https://openai.github.io/openai-agents-python/guardrails/  
-- Tracing: https://openai.github.io/openai-agents-python/tracing/  
-- Cookbooks: https://github.com/openai/openai-agents-python/tree/main/cookbooks  
+OpenAI Agents SDK Docs:
+- Overview: https://openai.github.io/openai-agents-python/
+- Running Agents: https://openai.github.io/openai-agents-python/running_agents/
+- Sessions: https://openai.github.io/openai-agents-python/sessions/
+- Guardrails: https://openai.github.io/openai-agents-python/guardrails/
+- Tracing: https://openai.github.io/openai-agents-python/tracing/
+- Cookbooks: https://github.com/openai/openai-agents-python/tree/main/cookbooks
