@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -22,6 +25,9 @@ class ClientConfig:
     agent_name: str
     sender: str
     log_level: str = "info"
+    quiet: bool = False
+    json: bool = False  # emit one compact JSON object per SSE event line
+    max_events: int | None = None
 
 
 class StreamPrinter:
@@ -43,11 +49,19 @@ class StreamPrinter:
         # Track AI turn token streaming to avoid duplicating final text
         self._saw_tokens = False
         self._printed_ai_header = False
+        # Connection state
+        self._connected = threading.Event()
+        self._ever_connected = False
+        # Event counting for --max-events
+        self._events_seen = 0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._connected.clear()
+        self._ever_connected = False
+        self._events_seen = 0
         self._thread = threading.Thread(target=self._run, name="sse-stream", daemon=True)
         self._thread.start()
 
@@ -90,56 +104,135 @@ class StreamPrinter:
         threshold = getattr(self._cfg, "log_level", "info")
         return self._level_value(level) >= self._level_value(threshold)
 
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            url = f"{self._cfg.base_url.rstrip('/')}/stream/{self._cfg.conversation_id}"
+    # ----- internal helpers to simplify control flow -----
+    def _build_stream_url(self) -> str:
+        base_url = self._cfg.base_url.rstrip("/")
+        url = f"{base_url}/stream/{self._cfg.conversation_id}"
+        if self._cfg.max_events is not None and self._cfg.max_events > 0:
+            url = f"{url}?max_events={int(self._cfg.max_events)}"
+        return url
+
+    def _open_stream(self, url: str) -> AbstractContextManager[httpx.Response]:
+        timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
+        return httpx.stream("GET", url, timeout=timeout)
+
+    def _backoff_sleep(self, backoff_delay: float) -> None:
+        time.sleep(min(5.0, backoff_delay) + random.uniform(0, 0.2))
+
+    def _next_backoff(self, backoff_delay: float) -> float:
+        return min(5.0, backoff_delay * 2)
+
+    def _on_connected(self) -> None:
+        self._connected.set()
+        self._ever_connected = True
+
+    def _iter_sse_data(self, resp: httpx.Response) -> Iterator[dict[str, Any]]:
+        for line in resp.iter_lines():
+            if self._stop.is_set():
+                break
+            if not line:
+                continue
+            if not line.startswith("data: "):
+                continue
+            payload = line[len("data: ") :]
             try:
-                with httpx.stream("GET", url, timeout=None) as resp:
-                    if resp.status_code >= 400:
-                        self._println(f"[sse] error: {resp.status_code}")
-                        time.sleep(0.5)
-                        continue
-                    # Basic SSE parsing: lines starting with 'data: '
-                    for line in resp.iter_lines():
-                        if self._stop.is_set():
-                            break
-                        if not line:
-                            continue
-                        if line.startswith("data: "):
-                            payload = line[len("data: ") :]
-                            try:
-                                data = json.loads(payload)
-                            except Exception:
-                                self._println(f"[event] {payload}")
-                                continue
-                            self._handle_event(data)
+                data = json.loads(payload)
+            except Exception:
+                if not (self._cfg.quiet or self._cfg.json):
+                    self._println(f"[event] {payload}")
+                continue
+            yield data
+
+    def _should_stop_due_to_max_events(self) -> bool:
+        return (
+            self._cfg.max_events is not None
+            and self._cfg.max_events > 0
+            and self._events_seen >= int(self._cfg.max_events)
+        )
+
+    def _is_stale(self, data: dict[str, Any]) -> bool:
+        if not self._since_iso:
+            return False
+        ev_created = str(data.get("created_at", ""))
+        try:
+            return bool(ev_created and ev_created < self._since_iso)
+        except Exception:
+            return True
+
+    def _log_http_error(self, status_code: int) -> None:
+        if not (self._cfg.quiet or self._cfg.json):
+            self._println(f"[sse] error: {status_code}")
+
+    def _log_reconnect(self, exc: Exception) -> None:
+        if not (self._cfg.quiet or self._cfg.json):
+            self._println(f"[sse] reconnecting after error: {exc}")
+
+    def _process_stream_lines(self, resp: httpx.Response) -> bool:
+        for data in self._iter_sse_data(resp):
+            self._handle_event(data)
+            self._events_seen += 1
+            if self._should_stop_due_to_max_events():
+                self._stop.set()
+                return True
+        return False
+
+    def _attempt_stream(self, backoff_delay: float) -> tuple[bool, float]:
+        url = self._build_stream_url()
+        with self._open_stream(url) as resp:
+            if resp.status_code >= 400:
+                self._log_http_error(resp.status_code)
+                self._backoff_sleep(backoff_delay)
+                return True, self._next_backoff(backoff_delay)
+            self._on_connected()
+            backoff_delay = 0.5
+            stopped_due_to_max = self._process_stream_lines(resp)
+            if self._final_event.is_set():
+                return False, backoff_delay
+            if stopped_due_to_max:
+                return True, backoff_delay
+            return True, backoff_delay
+
+    def _run(self) -> None:
+        backoff_delay = 0.5
+        while not self._stop.is_set():
+            try:
+                should_continue, backoff_delay = self._attempt_stream(backoff_delay)
+                if not should_continue:
+                    break
             except Exception as exc:  # noqa: BLE001
-                self._println(f"[sse] reconnecting after error: {exc}")
-                time.sleep(0.5)
+                self._log_reconnect(exc)
+                self._backoff_sleep(backoff_delay)
+                backoff_delay = self._next_backoff(backoff_delay)
 
     def _handle_event(self, data: dict[str, Any]) -> None:
         event_type = str(data.get("event", "")).lower()
-        if self._since_iso:
-            ev_created = str(data.get("created_at", ""))
-            try:
-                if ev_created and ev_created < self._since_iso:
-                    return
-            except Exception:
-                return
-        if event_type == "token":
-            self._handle_token(data)
+        if self._is_stale(data):
             return
-        if event_type == "user_message":
-            self._handle_user_message(data)
+        # Render modes: json, quiet, pretty (default)
+        if getattr(self._cfg, "json", False):
+            self._println(json.dumps(data, separators=(",", ":")))
+            if event_type == "output":
+                text = str(data.get("text", ""))
+                self._final_text = text
+                self._final_event.set()
             return
-        if event_type == "tool_step":
-            self._handle_tool_step(data)
+        if getattr(self._cfg, "quiet", False):
+            if event_type == "output":
+                text = str(data.get("text", ""))
+                self._println(text)
+                self._final_text = text
+                self._final_event.set()
             return
-        if event_type == "log":
-            self._handle_log(data)
-            return
-        if event_type == "output":
-            self._handle_output(data)
+        handlers = {
+            "token": self._handle_token,
+            "user_message": self._handle_user_message,
+            "tool_step": self._handle_tool_step,
+            "log": self._handle_log,
+            "output": self._handle_output,
+        }
+        handler = handlers.get(event_type)
+        if handler is not None:
+            handler(data)
             return
         self._println("")
         self._println(f"[event] {json.dumps(data)[:500]}")
@@ -203,8 +296,12 @@ class StreamPrinter:
         ok = self._final_event.wait(timeout=timeout)
         return ok, (self._final_text if ok else None)
 
+    def wait_until_connected(self, timeout: float) -> bool:
+        """Wait until the stream has established a connection (HTTP 2xx)."""
+        return self._connected.wait(timeout)
 
-def _send_message(cfg: ClientConfig, content: str) -> None:
+
+def _send_message(cfg: ClientConfig, content: str) -> bool:
     url = f"{cfg.base_url.rstrip('/')}/send"
     payload = {
         "id": f"msg-{uuid.uuid4()}",
@@ -217,9 +314,11 @@ def _send_message(cfg: ClientConfig, content: str) -> None:
     try:
         r = httpx.post(url, json=payload, timeout=10.0)
         if r.status_code >= 400:
-            print(f"[send] error: {r.status_code} {r.text}")
+            return False
+        return True
     except Exception as exc:  # noqa: BLE001
-        print(f"[send] request failed: {exc}")
+        _ = exc  # silence unused in prod logs; message handled by caller
+        return False
 
 
 def _default_sender() -> str:
@@ -260,6 +359,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--conv", default=f"conv-{str(uuid.uuid4())[:8]}")
     p.add_argument("--agent", default=os.getenv("AGENT_NAME", "DevAgent"))
     p.add_argument("--sender", default=_default_sender())
+    p.add_argument(
+        "--log-level",
+        choices=["debug", "info", "warning", "error"],
+        default="info",
+        help="Lowest log level to render from server logs",
+    )
+    p.add_argument("--quiet", action="store_true", help="Print only the final output line")
+    p.add_argument(
+        "--json", action="store_true", help="Emit one compact JSON object per SSE event line"
+    )
+    p.add_argument(
+        "--max-events",
+        type=int,
+        default=None,
+        help="Stop after N SSE events (and pass-through to server)",
+    )
     # One-shot mode: send a single message and exit after final output (or timeout)
     p.add_argument(
         "--message",
@@ -271,7 +386,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=float(os.getenv("MAGENT2_CLIENT_TIMEOUT", "60")),
         help="Timeout in seconds for one-shot mode (default 60)",
     )
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    # Basic usage validation for mutually exclusive modes and values
+    if getattr(args, "json", False) and getattr(args, "quiet", False):
+        print("--json and --quiet are mutually exclusive", file=sys.stderr)
+        raise SystemExit(5)
+    if args.max_events is not None and args.max_events <= 0:
+        print("--max-events must be a positive integer", file=sys.stderr)
+        raise SystemExit(5)
+    return args
 
 
 def repl(cfg: ClientConfig) -> None:
@@ -326,8 +449,15 @@ def one_shot(cfg: ClientConfig, message: str, timeout: float) -> int:
     cutoff = datetime.now(UTC).timestamp() - 0.1
     stream._since_iso = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
     stream.start()
+    # Verify we can connect to the stream promptly; otherwise treat as connect failure (exit 4)
+    connect_wait = max(0.1, min(1.0, float(timeout)))
+    if not stream.wait_until_connected(timeout=connect_wait):
+        print("[client] failed to connect to stream", file=sys.stderr)
+        return 4
     try:
-        _send_message(cfg, message)
+        if not _send_message(cfg, message):
+            print("[send] request failed", file=sys.stderr)
+            return 3
         ok, _final = stream.wait_for_final(timeout=timeout)
         if not ok:
             print("\n[client] timeout waiting for final output", file=sys.stderr)
@@ -347,6 +477,10 @@ def main(argv: list[str] | None = None) -> None:
         conversation_id=str(args.conv),
         agent_name=str(args.agent),
         sender=str(args.sender),
+        log_level=str(args.log_level),
+        quiet=bool(args.quiet),
+        json=bool(args.json),
+        max_events=(int(args.max_events) if args.max_events is not None else None),
     )
     if args.message:
         code = one_shot(cfg, str(args.message), float(args.timeout))
