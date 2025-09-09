@@ -6,6 +6,7 @@ from typing import Any
 
 from magent2.bus.redis_adapter import RedisBus
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, TokenEvent
+from magent2.observability import get_json_logger
 from magent2.runner.config import load_config
 from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
 from magent2.worker.worker import Runner, Worker
@@ -43,6 +44,15 @@ def build_runner_from_env() -> Runner:
                 from magent2.tools.chat import chat_send
 
                 available["chat_send"] = chat_send
+            except Exception:
+                pass
+
+            # Signals tools (send/wait)
+            try:
+                from magent2.tools.signals.wrappers import signal_send, signal_wait
+
+                available["signal_send"] = signal_send
+                available["signal_wait"] = signal_wait
             except Exception:
                 pass
 
@@ -101,7 +111,10 @@ def build_runner_from_env() -> Runner:
                     if tool is not None:
                         resolved.append(tool)
                     else:
-                        print(f"[worker] warn: unknown tool '{name}', skipping")
+                        get_json_logger("magent2").warning(
+                            "unknown tool name, skipping",
+                            extra={"event": "config_warn", "tool": name},
+                        )
             else:
                 # Default to all detected tools for developer convenience
                 resolved = list(available.values())
@@ -113,11 +126,21 @@ def build_runner_from_env() -> Runner:
             name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model, tools=_tools_any
         )
         tool_names = ",".join([getattr(t, "__name__", "tool") for t in tools]) or "<none>"
-        print(
-            f"[worker] runner=OpenAI agent={cfg.agent_name} model={cfg.model} tools=[{tool_names}]"
+        get_json_logger("magent2").info(
+            "runner selected",
+            extra={
+                "event": "runner_selected",
+                "runner": "OpenAI",
+                "agent": cfg.agent_name,
+                "model": cfg.model,
+                "metadata": {"tools": tool_names},
+            },
         )
         return OpenAIAgentsRunner(agent)
-    print(f"[worker] runner=Echo agent={cfg.agent_name}")
+    get_json_logger("magent2").info(
+        "runner selected",
+        extra={"event": "runner_selected", "runner": "Echo", "agent": cfg.agent_name},
+    )
     return EchoRunner()
 
 

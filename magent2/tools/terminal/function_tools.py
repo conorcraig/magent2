@@ -144,7 +144,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         # Convert exceptions into a concise, redacted failure string
         msg = _redact_text(str(exc), policy.redact_substrings, policy.redact_patterns)
         concise_err = msg[: policy.function_output_max_chars]
-        logger.info(
+        logger.error(
             "tool error",
             extra={
                 "event": "tool_error",

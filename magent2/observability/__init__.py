@@ -4,6 +4,7 @@ import contextvars
 import datetime as dt
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -93,13 +94,39 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
+def _parse_level(value: str | None, default: int = logging.INFO) -> int:
+    name = (value or "").strip().upper()
+    if not name:
+        return default
+    level = getattr(logging, name, None)
+    return level if isinstance(level, int) else default
+
+
+def _level_for_logger(logger_name: str) -> int:
+    base_level = _parse_level(os.getenv("LOG_LEVEL"), logging.INFO)
+    overrides = (os.getenv("LOG_MODULE_LEVELS") or "").strip()
+    if not overrides:
+        return base_level
+    for entry in overrides.split(","):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        prefix, lvl = entry.split("=", 1)
+        prefix = prefix.strip()
+        if not prefix:
+            continue
+        if logger_name == prefix or logger_name.startswith(prefix + "."):
+            return _parse_level(lvl, base_level)
+    return base_level
+
+
 def get_json_logger(name: str = "magent2") -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler(stream=sys.stdout)
         handler.setFormatter(JsonLogFormatter())
         logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(_level_for_logger(name))
         logger.propagate = False
     return logger
 
