@@ -121,7 +121,7 @@ curl -N http://localhost:8000/stream/conv1
 - Pre-commit (staged files): `uv run pre-commit run`
 - Full local quality gate: `just check`
 
-### Non-interactive one-shot mode
+### Client CLI (one-shot and streaming)
 
 Send a single message and exit after the final output:
 
@@ -138,8 +138,35 @@ uv run python scripts/client.py \
 Notes:
 
 - `--base-url auto` attempts to discover the Gateway port from Docker Compose; falls back to `http://localhost:8000`.
-- Exit code is `0` on success, `2` on timeout.
+- Exit codes: `0` ok, `2` timeout, `3` send failed, `4` stream connect failed, `5` usage.
 - The client renders streamed events including tool steps and `[log][LEVEL] component: message` entries.
+
+Flags:
+
+```bash
+# Adjust server log rendering threshold (default info)
+--log-level {debug,info,warning,error}
+
+# Output modes (mutually exclusive):
+--quiet            # only the final output line
+--json             # one compact JSON object per SSE event line
+
+# Limit events processed (also passed as query param to the stream URL)
+--max-events N
+```
+
+Examples:
+
+```bash
+# JSON mode for machine parsing
+uv run python scripts/client.py --message "ping" --json --timeout 10
+
+# Quiet mode for shell scripting
+uv run python scripts/client.py --message "ping" --quiet --timeout 10
+
+# Stream only first 5 events
+uv run python scripts/client.py --conv conv-1 --max-events 5
+```
 
 ## Todo function tools
 
