@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
+from magent2.observability import get_json_logger, get_metrics
 
 
 class SendRequest(BaseModel):
@@ -23,6 +24,8 @@ class SendRequest(BaseModel):
 
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
+    logger = get_json_logger("magent2.gateway")
+    metrics = get_metrics()
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
@@ -36,6 +39,14 @@ def create_app(bus: Bus) -> FastAPI:
         try:
             bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=payload))
         except Exception as exc:
+            logger.error(
+                "gateway send error",
+                extra={
+                    "event": "gateway_error",
+                    "path": "send",
+                    "conversation_id": message.conversation_id,
+                },
+            )
             raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Additionally publish to agent topic when recipient hints an agent
@@ -47,10 +58,27 @@ def create_app(bus: Bus) -> FastAPI:
                 try:
                     bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=payload))
                 except Exception as exc:
+                    logger.error(
+                        "gateway send error",
+                        extra={
+                            "event": "gateway_error",
+                            "path": "send",
+                            "conversation_id": message.conversation_id,
+                            "agent": agent_name,
+                        },
+                    )
                     raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Do not emit a synthetic user_message event here to keep stream ordering predictable
 
+        logger.info(
+            "gateway send",
+            extra={
+                "event": "gateway_send",
+                "conversation_id": message.conversation_id,
+            },
+        )
+        metrics.increment("gateway_sends", {"conversation_id": message.conversation_id})
         return {"status": "ok", "topic": conv_topic}
 
     @app.get("/stream/{conversation_id}")
@@ -91,6 +119,11 @@ def create_app(bus: Bus) -> FastAPI:
                     # avoid tight loop when no new items are available
                     await asyncio.sleep(0.02)
 
+        logger.info(
+            "gateway stream start",
+            extra={"event": "gateway_stream", "conversation_id": conversation_id},
+        )
+        metrics.increment("gateway_streams", {"conversation_id": conversation_id})
         return StreamingResponse(event_gen(), media_type="text/event-stream")
 
     @app.get("/ready")
@@ -100,6 +133,10 @@ def create_app(bus: Bus) -> FastAPI:
             list(bus.read("ready:probe", last_id=None, limit=1))
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - error path mapping
+            logger.error(
+                "gateway not ready",
+                extra={"event": "gateway_error", "path": "ready"},
+            )
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 
     return app

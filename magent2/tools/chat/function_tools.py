@@ -5,6 +5,11 @@ from typing import Any
 
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import MessageEnvelope
+from magent2.observability import (
+    get_json_logger,
+    get_metrics,
+    get_run_context,
+)
 
 _TEST_BUS: Bus | None = None
 _BUS_CACHE: Bus | None = None
@@ -96,6 +101,9 @@ def send_message(
     conversation_id: str | None = None,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     rec = (recipient or "").strip()
     if not rec or not (rec.startswith("chat:") or rec.startswith("agent:")):
         raise ValueError("recipient must be 'chat:{conversation_id}' or 'agent:{Name}'")
@@ -108,5 +116,31 @@ def send_message(
     env = _build_envelope(cid, sender, rec, text)
 
     bus = _get_bus()
-    published_to = _publish(bus, env)
-    return {"ok": True, "envelope_id": env.id, "published_to": published_to}
+    logger.info(
+        "tool call",
+        extra={
+            "event": "tool_call",
+            "tool": "chat.send",
+            "metadata": {"recipient": rec},
+        },
+    )
+    metrics.increment(
+        "tool_calls",
+        {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))},
+    )
+    try:
+        published_to = _publish(bus, env)
+        return {"ok": True, "envelope_id": env.id, "published_to": published_to}
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "chat.send",
+                "metadata": {"error": str(exc)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
+        raise

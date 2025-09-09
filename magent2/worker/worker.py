@@ -106,7 +106,7 @@ class Worker:
                     )
             except Exception:
                 errored = True
-                logger.info(
+                logger.exception(
                     "run errored",
                     extra={
                         "event": "run_errored",

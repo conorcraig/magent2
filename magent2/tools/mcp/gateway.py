@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from magent2.observability import get_json_logger
+
 from .client import MCPClient, spawn_stdio_server
 from .config import MCPServerConfig
 
@@ -159,11 +161,16 @@ class MCPToolGateway:
 
     def close(self) -> None:
         # Close via stored context managers to ensure cleanup in correct order
+        logger = get_json_logger("magent2.tools.mcp") if "get_json_logger" in globals() else None
+        if logger is not None:
+            logger.debug("mcp gateway close", extra={"event": "mcp_close"})
         for ctx in reversed(self._contexts):
             try:
                 # mypy: dynamic protocol (__exit__ exists on context managers)
                 ctx.__exit__(None, None, None)  # type: ignore[attr-defined]
             except Exception:
+                if logger is not None:
+                    logger.debug("mcp gateway close error", extra={"event": "mcp_close_error"})
                 pass
         self._clients.clear()
         self._contexts.clear()

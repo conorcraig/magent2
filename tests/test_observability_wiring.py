@@ -173,3 +173,49 @@ def test_tool_logs_include_ids_and_tool_counters(
         e for e in snap if e["name"] == "tool_calls" and e["labels"].get("tool") == "terminal"
     ]
     assert tool_calls and tool_calls[0]["value"] >= 1
+
+
+def test_chat_tool_logs_include_ids_and_tool_counters(
+    capsys: Any,
+) -> None:
+    # Reset metrics and rebind the tools logger to current stdout
+    reset_metrics()
+    tools_logger = get_json_logger("magent2.tools")
+    for h in list(tools_logger.handlers):
+        try:
+            tools_logger.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    tools_logger = get_json_logger("magent2.tools")
+    tools_logger.setLevel(20)
+
+    # Use in-memory bus for chat tool
+    from magent2.tools.chat.function_tools import send_message, set_bus_for_testing
+
+    bus = _InMemoryBus()
+    set_bus_for_testing(bus)
+
+    run_id = str(uuid.uuid4())
+    with use_run_context(run_id, conversation_id="conv_tool2", agent="DevAgent"):
+        _ = send_message("chat:conv_tool2", "hi2")
+
+    # Cleanup
+    set_bus_for_testing(None)
+
+    out = capsys.readouterr().out
+    recs = _parse_json_lines(out)
+    calls = [r for r in recs if r.get("event") == "tool_call" and r.get("tool") == "chat.send"]
+    assert calls, "expected a chat tool_call log record"
+    rec = calls[-1]
+    assert rec.get("conversation_id") == "conv_tool2"
+    assert rec.get("run_id") == run_id
+
+    snap = get_metrics().snapshot()
+    tool_calls = [
+        e for e in snap if e["name"] == "tool_calls" and e["labels"].get("tool") == "chat"
+    ]
+    assert tool_calls and tool_calls[0]["value"] >= 1
