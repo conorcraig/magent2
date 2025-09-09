@@ -1,6 +1,7 @@
 # Handover: Git worktree allocator for per‑agent branches
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/87
 
 ## Context
 

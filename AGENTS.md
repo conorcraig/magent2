@@ -106,6 +106,7 @@
 
 - **Dependency manager**: `uv` (not Poetry). Use `uv add/remove`, never `pip` or `uv pip` for dependency changes.
 - **GitHub**: Prefer `gh` CLI; close issues you open once work is complete, unless the user says otherwise.
+- **Issue ownership**: All handover issues are assigned to `@conorcraig`. To claim an issue, add a top-level comment saying `claim` before starting work. Always read the latest comments to ensure it is not already claimed.
 - **Pre-commit**: Present; run on staged files only.
 - **Testing**: TDD-oriented; reuse fixtures; read `conftest.py`.
 - **Coding style**: Minimal, YAGNI; no commented-out or TODO code; preserve indentation and avoid unrelated reformatting.
