@@ -1,6 +1,7 @@
 # Handover: Client v1 polish — flags, JSON mode, backoff, docs
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/77
 
 ## Context
 

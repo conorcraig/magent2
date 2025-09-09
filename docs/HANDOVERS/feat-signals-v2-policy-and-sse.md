@@ -1,6 +1,7 @@
 # Handover: Signals v2 — wait_any/all, policy, and SSE visibility
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/83
 
 ## Context
 

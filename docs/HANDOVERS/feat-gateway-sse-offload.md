@@ -1,6 +1,7 @@
 # Handover: Gateway SSE non‑blocking offload (to_thread + yield cadence)
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/80
 
 ## Context
 

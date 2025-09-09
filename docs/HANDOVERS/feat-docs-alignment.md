@@ -1,6 +1,7 @@
 # Handover: Docs alignment for SSE, Redis Streams, and Terminal policy
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/79
 
 ## Context
 

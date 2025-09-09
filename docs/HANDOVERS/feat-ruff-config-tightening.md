@@ -1,6 +1,7 @@
 # Handover: Ruff configuration tightening and fixes (stage 1)
 
 Owner: next agent
+Tracking issue: https://github.com/conorcraig/magent2/issues/82
 
 ## Context
 
