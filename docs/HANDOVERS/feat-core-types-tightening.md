@@ -1,7 +1,7 @@
 # Handover: Tighten core types for BusMessage.payload
 
 Owner: next agent
-Tracking issue: https://github.com/conorcraig/magent2/issues/78
+Tracking issue: <https://github.com/conorcraig/magent2/issues/78>
 
 ## Context
 
