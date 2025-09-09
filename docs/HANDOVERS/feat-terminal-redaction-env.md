@@ -1,7 +1,7 @@
 # Handover: Terminal output redaction — env-driven patterns and tests
 
 Owner: next agent
-Tracking issue: https://github.com/conorcraig/magent2/issues/85
+Tracking issue: <https://github.com/conorcraig/magent2/issues/85>
 
 ## Context
 

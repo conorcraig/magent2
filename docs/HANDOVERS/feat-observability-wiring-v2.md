@@ -1,7 +1,7 @@
 # Handover: Observability wiring v2 — structured logs and counters across paths
 
 Owner: next agent
-Tracking issue: https://github.com/conorcraig/magent2/issues/81
+Tracking issue: <https://github.com/conorcraig/magent2/issues/81>
 
 ## Context
 

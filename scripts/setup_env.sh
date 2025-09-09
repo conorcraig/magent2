@@ -39,4 +39,3 @@ fi
 ~/.local/bin/gh auth status || true
 
 echo "Environment setup complete."
-

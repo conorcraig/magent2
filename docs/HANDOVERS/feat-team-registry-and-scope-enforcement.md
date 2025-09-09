@@ -1,7 +1,7 @@
 # Handover: Team registry and file‑scope enforcement
 
 Owner: next agent
-Tracking issue: https://github.com/conorcraig/magent2/issues/84
+Tracking issue: <https://github.com/conorcraig/magent2/issues/84>
 
 ## Context
 

@@ -23,6 +23,7 @@ class RedisBus(Bus):
         *,
         group_name: str | None = None,
         consumer_name: str | None = None,
+        block_ms: int | None = None,
         client: Any | None = None,
     ) -> None:
         try:
@@ -39,6 +40,7 @@ class RedisBus(Bus):
 
         self._group = group_name
         self._consumer = consumer_name or f"consumer-{uuid.uuid4()}"
+        self._block_ms = block_ms
 
     # ----------------------------
     # Public API
@@ -136,7 +138,7 @@ class RedisBus(Bus):
             consumername=self._consumer,
             streams={topic: ">"},
             count=limit,
-            block=0,
+            block=(self._block_ms if self._block_ms is not None else 0),
         )
 
         if not resp:

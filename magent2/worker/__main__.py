@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import time
+import uuid
 from collections.abc import Iterable
 from typing import Any
 
@@ -146,13 +148,29 @@ def build_runner_from_env() -> Runner:
 
 def main() -> None:
     cfg = load_config()
-    bus = RedisBus(redis_url=os.getenv("REDIS_URL"))
+    # Configure a consumer group with a reasonable default and enable blocking reads
+    bus = RedisBus(
+        redis_url=os.getenv("REDIS_URL"),
+        group_name="magent2",
+        consumer_name=f"worker-{uuid.uuid4()}",
+        block_ms=1000,
+    )
     runner: Runner = build_runner_from_env()
     worker = Worker(agent_name=cfg.agent_name, bus=bus, runner=runner)
     # Simple loop: poll until interrupted
     try:
+        # Option A fallback: small exponential backoff when no messages are processed
+        sleep_seconds = 0.05
+        max_sleep_seconds = 0.2
         while True:
-            worker.process_available(limit=100)
+            processed = worker.process_available(limit=100)
+            if processed == 0:
+                time.sleep(sleep_seconds)
+                # Exponential backoff with cap
+                sleep_seconds = min(max_sleep_seconds, sleep_seconds * 2)
+            else:
+                # Reset backoff after successful processing
+                sleep_seconds = 0.05
     except KeyboardInterrupt:
         pass
 
