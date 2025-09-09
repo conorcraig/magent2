@@ -62,6 +62,7 @@
   - Do not push trial-and-error to CI. Diagnose locally first.
   - Do not revert or reset large areas of code without explicit user approval.
   - Do not run pre-commit across the entire repo just to validate staged changes.
+  - Do not create PR via gh cli, let user create it for you.
 
 ## Workflow Expectations
 
