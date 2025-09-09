@@ -63,7 +63,9 @@ def create_app(bus: Bus) -> FastAPI:
             first_token_sent = False
             # Simple polling loop over Bus.read
             while True:
-                items = list(bus.read(topic, last_id=last_id, limit=100))
+                items = await asyncio.to_thread(
+                    lambda: list(bus.read(topic, last_id=last_id, limit=100))
+                )
                 if items:
                     for m in items:
                         payload = m.payload
@@ -85,8 +87,9 @@ def create_app(bus: Bus) -> FastAPI:
                         sent += 1
                         if max_events is not None and sent >= max_events:
                             return
-                # avoid tight loop
-                await asyncio.sleep(0.02)
+                else:
+                    # avoid tight loop when no new items are available
+                    await asyncio.sleep(0.02)
 
         return StreamingResponse(event_gen(), media_type="text/event-stream")
 
