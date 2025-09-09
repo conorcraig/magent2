@@ -118,12 +118,14 @@
 
 - Preferred: run the setup script
   - This repository includes a non-interactive, user-space setup script that installs `uv`, installs `gh` into `$HOME/.local/bin`, authenticates `gh` using `GH_TOKEN`, and syncs Python dependencies if `pyproject.toml` exists.
+
 ```bash
 bash scripts/setup_env.sh
 ```
 
 - Manual GH CLI install and auth (Linux, user-space)
   - If you prefer to run the documented steps directly:
+
 ```bash
 # Install gh in user space
 VER=2.61.0
@@ -144,4 +146,5 @@ echo "$GH_TOKEN" | ~/.local/bin/gh auth login --with-token
   - Fall back to direct HTTPS API requests only if `gh` is unavailable.
 
 ### Notes on dependencies
+
 - The setup script runs `uv sync --group dev` so development dependencies are installed alongside default ones. If you want to install additional groups, append more flags, e.g. `--group test`.

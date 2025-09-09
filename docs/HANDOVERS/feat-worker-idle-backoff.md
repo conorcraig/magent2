@@ -1,7 +1,7 @@
 # Handover: Worker idle CPU reduction (blocking reads and backoff)
 
 Owner: next agent
-Tracking issue: https://github.com/conorcraig/magent2/issues/86
+Tracking issue: <https://github.com/conorcraig/magent2/issues/86>
 
 ## Context
 
