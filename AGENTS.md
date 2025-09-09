@@ -111,3 +111,35 @@
 - **Coding style**: Minimal, YAGNI; no commented-out or TODO code; preserve indentation and avoid unrelated reformatting.
 - **Security**: Never display `.env` or other secrets.
 - **Terminal**: Prefer absolute paths; simple commands; use `sleep` for waits.
+
+## Environment Setup
+
+- Preferred: run the setup script
+  - This repository includes a non-interactive, user-space setup script that installs `uv`, installs `gh` into `$HOME/.local/bin`, authenticates `gh` using `GH_TOKEN`, and syncs Python dependencies if `pyproject.toml` exists.
+```bash
+bash scripts/setup_env.sh
+```
+
+- Manual GH CLI install and auth (Linux, user-space)
+  - If you prefer to run the documented steps directly:
+```bash
+# Install gh in user space
+VER=2.61.0
+ARCH=$(case "$(uname -m)" in x86_64) echo amd64 ;; aarch64|arm64) echo arm64 ;; *) echo amd64 ;; esac)
+curl -fsSL "https://github.com/cli/cli/releases/download/v${VER}/gh_${VER}_linux_${ARCH}.tar.gz" \
+  | tar -xz --strip-components=2 -C "$HOME/.local/bin" gh_${VER}_linux_${ARCH}/bin/gh
+
+# Verify
+~/.local/bin/gh --version
+
+# Cursor injects GH_TOKEN as secret
+echo "$GH_TOKEN" | ~/.local/bin/gh auth login --with-token
+~/.local/bin/gh auth status
+```
+
+- Policy for GitHub interactions
+  - Use `gh` CLI by default for repo operations (issues, PRs, labels, etc.).
+  - Fall back to direct HTTPS API requests only if `gh` is unavailable.
+
+### Notes on dependencies
+- The setup script runs `uv sync --group dev` so development dependencies are installed alongside default ones. If you want to install additional groups, append more flags, e.g. `--group test`.
