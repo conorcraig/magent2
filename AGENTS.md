@@ -145,6 +145,52 @@ echo "$GH_TOKEN" | ~/.local/bin/gh auth login --with-token
   - Use `gh` CLI by default for repo operations (issues, PRs, labels, etc.).
   - Fall back to direct HTTPS API requests only if `gh` is unavailable.
 
+## GitHub CLI Workflow
+
+### Investigating CI Failures
+
+```bash
+# Find open PRs
+gh pr list --state open
+
+# Check CI status for specific PRs
+gh pr checks <pr_number>
+
+# Get detailed CI failure logs
+gh run list --limit 10
+gh run view <run_id> --log-failed
+```
+
+### Working on PRs
+
+```bash
+# Checkout PR branches to work on them
+gh pr checkout <pr_number>
+
+# Make changes, then commit and push
+git add <files>
+git commit -m "descriptive message"
+git push
+```
+
+### Monitoring CI Results
+
+```bash
+# Check CI status after pushing changes
+gh pr checks <pr_number>
+
+# Wait for CI to complete, then verify success
+gh pr checks <pr_number>  # Should show all green
+```
+
+### Key Commands
+
+- `gh pr list` - List PRs
+- `gh pr checks <number>` - Check CI status for a specific PR
+- `gh pr checkout <number>` - Switch to PR branch locally
+- `gh run list` - List recent workflow runs
+- `gh run view <run_id> --log-failed` - Get detailed failure logs
+
 ### Notes on dependencies
 
 - The setup script runs `uv sync --group dev` so development dependencies are installed alongside default ones. If you want to install additional groups, append more flags, e.g. `--group test`.
