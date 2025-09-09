@@ -3,13 +3,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(slots=True)
 class BusMessage:
     topic: str
-    payload: dict
+    payload: dict[str, Any]
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
