@@ -70,7 +70,7 @@ Build a general-purpose, well-tooled software agent that can operate solo or as 
 - Env-driven (defaults safe):
   - AGENT_NAME, AGENT_MODEL, AGENT_INSTRUCTIONS(_FILE), AGENT_TOOLS.
   - AGENT_MAX_TURNS.
-  - MCP: AGENT_<Name>_MCP_<N>_CMD/ARGS/CWD/ENV_JSON/ALLOW/BLOCK.
+  - MCP: `AGENT_<Name>_MCP_<N>_CMD`/`ARGS`/`CWD`/`ENV_JSON`/`ALLOW`/`BLOCK`.
   - Redis URL; sandbox root; redaction/conf policy.
 
 ## 8. Acceptance Criteria

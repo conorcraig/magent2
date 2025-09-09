@@ -12,9 +12,7 @@ class _MemoryBus(Bus):
         self._topics.setdefault(topic, []).append(message)
         return message.id
 
-    def read(
-        self, topic: str, last_id: str | None = None, limit: int = 100
-    ) -> list[BusMessage]:
+    def read(self, topic: str, last_id: str | None = None, limit: int = 100) -> list[BusMessage]:
         items = self._topics.get(topic, [])
         if last_id is None:
             return items[-limit:]
