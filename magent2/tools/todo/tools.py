@@ -6,6 +6,8 @@ from typing import Any
 
 import redis
 
+from magent2.observability import get_json_logger, get_metrics, get_run_context
+
 from .models import Task
 from .redis_store import RedisTodoStore
 
@@ -47,31 +49,106 @@ def _require_metadata_dict(name: str, value: dict[str, Any] | None) -> dict[str,
 def create_task_tool(
     conversation_id: str, title: str, metadata: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     cid = _require_str_non_empty("conversation_id", conversation_id)
     ttl = _require_str_non_empty("title", title)
     md = _require_metadata_dict("metadata", metadata)
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "todo.create",
+                "metadata": {"conversation_id": cid},
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=md or {})
         return {"task": _serialize_task(t)}
     except redis.exceptions.RedisError as e:
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "todo.create",
+                "metadata": {"error": str(e)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return {"task": None, "error": str(e), "transient": True}
 
 
 def get_task_tool(task_id: str) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     tid = _require_str_non_empty("task_id", task_id)
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "todo.get",
+                "metadata": {"task_id": tid},
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         t = _get_store().get_task(tid)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
     except redis.exceptions.RedisError as e:
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "todo.get",
+                "metadata": {"error": str(e)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return {"task": None, "error": str(e), "transient": True}
 
 
 def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     cid = _require_str_non_empty("conversation_id", conversation_id)
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "todo.list",
+                "metadata": {"conversation_id": cid},
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         tasks = _get_store().list_tasks(cid)
         return {"tasks": [_serialize_task(t) for t in tasks]}
     except redis.exceptions.RedisError as e:
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "todo.list",
+                "metadata": {"error": str(e)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return {"tasks": [], "error": str(e), "transient": True}
 
 
@@ -82,6 +159,9 @@ def update_task_tool(
     completed: bool | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     tid = _require_str_non_empty("task_id", task_id)
     if title is not None and not isinstance(title, str):
         raise ValueError("title must be a string if provided")
@@ -89,18 +169,65 @@ def update_task_tool(
         raise ValueError("no fields to update")
     md = _require_metadata_dict("metadata", metadata)
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "todo.update",
+                "metadata": {"task_id": tid},
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         t = _get_store().update_task(tid, title=title, completed=completed, metadata=md)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
     except redis.exceptions.RedisError as e:
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "todo.update",
+                "metadata": {"error": str(e)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return {"task": None, "error": str(e), "transient": True}
 
 
 def delete_task_tool(task_id: str) -> dict[str, Any]:
+    logger = get_json_logger("magent2.tools")
+    metrics = get_metrics()
+    ctx = get_run_context() or {}
     tid = _require_str_non_empty("task_id", task_id)
     try:
+        logger.info(
+            "tool call",
+            extra={
+                "event": "tool_call",
+                "tool": "todo.delete",
+                "metadata": {"task_id": tid},
+            },
+        )
+        metrics.increment(
+            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         ok = _get_store().delete_task(tid)
         return {"ok": bool(ok)}
     except redis.exceptions.RedisError as e:
+        logger.error(
+            "tool error",
+            extra={
+                "event": "tool_error",
+                "tool": "todo.delete",
+                "metadata": {"error": str(e)[:200]},
+            },
+        )
+        metrics.increment(
+            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+        )
         return {"ok": False, "error": str(e), "transient": True}
 
 
