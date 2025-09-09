@@ -201,4 +201,4 @@ def test_main_args_mutually_exclusive_modes_exit_5(monkeypatch: pytest.MonkeyPat
                 "0.1",
             ]
         )
-    assert int(excinfo.value.code) == 5
+    assert excinfo.value.code == 5
