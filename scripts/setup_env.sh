@@ -5,7 +5,7 @@ set -euo pipefail
 # - Installs uv if missing
 # - Installs GitHub CLI to ~/.local/bin via manual binary download
 # - Authenticates gh non-interactively via GH_TOKEN if available
-# - Syncs Python dependencies via uv if pyproject.toml exists
+# - Syncs Python dependencies (including dev group) via uv if pyproject.toml exists
 
 mkdir -p "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
@@ -19,7 +19,8 @@ fi
 if command -v uv >/dev/null 2>&1; then
     uv --version || true
     if [ -f "pyproject.toml" ]; then
-        uv sync
+        # Install default + dev dependency groups
+        uv sync --group dev
     fi
 fi
 

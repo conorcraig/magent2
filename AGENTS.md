@@ -140,3 +140,6 @@ echo "$GH_TOKEN" | ~/.local/bin/gh auth login --with-token
 - Policy for GitHub interactions
   - Use `gh` CLI by default for repo operations (issues, PRs, labels, etc.).
   - Fall back to direct HTTPS API requests only if `gh` is unavailable.
+
+### Notes on dependencies
+- The setup script runs `uv sync --group dev` so development dependencies are installed alongside default ones. If you want to install additional groups, append more flags, e.g. `--group test`.
