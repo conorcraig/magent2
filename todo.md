@@ -1,56 +1,28 @@
 # Implementation plan (ordered, minimal-risk)
 
-1. Tighten core types
+1. Tighten core types (moved to handover)
 
-- [ ] Change `magent2/bus/interface.py` `BusMessage.payload: dict` → `dict[str, Any]`.
-- [ ] Fix any callsites/types as needed; keep contracts stable.
-- Acceptance:
-  - [ ] `uv run mypy` clean for changed files
-  - [ ] `uv run pytest -q` green
+- Tracked in `docs/HANDOVERS/feat-core-types-tightening.md`.
 
-1. Reduce Worker idle CPU (no interface change)
+1. Reduce Worker idle CPU (moved to handover)
 
-- Option A (quick):
-  - [ ] In `magent2/worker/__main__.py`, after `worker.process_available()`, if it returns 0, sleep with small backoff (start ~50ms, cap ~200ms).
-- Option B (preferred, still interface‑safe):
-  - [ ] Extend `magent2/bus/redis_adapter.RedisBus` to accept `block_ms: int | None = None` and use it for `xreadgroup(..., block=block_ms)` when a group is configured.
-  - [ ] In `magent2/worker/__main__.py`, construct `RedisBus(redis_url=..., group_name="magent2", consumer_name=<uuid>, block_ms=1000)` and acknowledge after publish (already implemented).
-- Acceptance:
-  - [ ] Worker uses near‑zero CPU when idle
-  - [ ] Tests unaffected; e2e still works
+- Tracked in `docs/HANDOVERS/feat-worker-idle-backoff.md`.
 
-1. Make Gateway SSE non‑blocking
+1. Make Gateway SSE non‑blocking (moved to handover)
 
-- [ ] In `magent2/gateway/app.py` `event_gen()`, offload sync reads via `await asyncio.to_thread(bus.read, topic, last_id=..., limit=...)`.
-- [ ] Keep small sleep only when empty; skip sleep after yields.
-- Acceptance:
-  - [ ] `/stream/{conversation_id}` remains responsive under load
-  - [ ] No event‑loop stalls; existing tests pass
+- Tracked in `docs/HANDOVERS/feat-gateway-sse-offload.md`.
 
-1. Improve failure logging at boundaries
+1. Improve failure logging at boundaries (moved into Observability v2 handover)
 
-- [ ] In `magent2/worker/worker.py` exception path inside `_run_and_stream`, use `logger.exception(..., extra=...)` (level error) and keep metrics.
-- [ ] In `magent2/gateway/app.py` publish/ready error paths, log at error before raising `HTTPException`.
-- [ ] In `magent2/tools/mcp/gateway.py close()` and similar cleanup, log at debug instead of silent `pass`.
-- Acceptance:
-  - [ ] Stack traces captured for unexpected errors
-  - [ ] Tests still pass (no noisy logs in tests)
+- Tracked in `docs/HANDOVERS/feat-observability-wiring-v2.md`.
 
-1. Terminal output redaction hardening
+1. Terminal output redaction hardening (moved to handover)
 
-- [ ] In `magent2/tools/terminal/tool.py`, broaden default redaction patterns (Bearer tokens, cloud keys) and reuse sensitive key hints from `magent2/observability`.
-- [ ] Support env‑driven redaction per README (`TERMINAL_REDACT_SUBSTRINGS`, `TERMINAL_REDACT_PATTERNS`) merged with defaults.
-- [ ] Add tests in `tests/test_terminal_tool.py` covering default and env‑driven redaction.
-- Acceptance:
-  - [ ] Secrets masked in outputs
-  - [ ] New tests pass
+- Tracked in `docs/HANDOVERS/feat-terminal-redaction-env.md`.
 
-1. Ruff configuration improvements (stage 1: low‑churn rules)
+1. Ruff configuration improvements (moved to handover)
 
-- [ ] In `pyproject.toml [tool.ruff.lint] select`, add `"B","S","T20"` (Bugbear, basic security, no print in lib code).
-- [ ] Fix violations in library code; allow prints in `scripts/` and `tests/` via directory scoping rather than inline ignores.
-- Acceptance:
-  - [ ] `uv run ruff check` clean
+- Tracked in `docs/HANDOVERS/feat-ruff-config-tightening.md`.
 
 1. Optional: tighten broad‑except (stage 2)
 
@@ -59,13 +31,9 @@
 - Acceptance:
   - [ ] No unwanted `BLE` violations in core
 
-1. Docs alignment
+1. Docs alignment (moved to handover)
 
-- [ ] Update `docs/refs/sse.md` with `asyncio.to_thread` pattern and heartbeat guidance.
-- [ ] Update `docs/refs/redis-streams.md` to mention optional blocking reads via adapter param.
-- [ ] Ensure README “Terminal tool (policy via env)” matches implemented redaction env vars.
-- Acceptance:
-  - [ ] Docs match behavior; links/current examples verified
+- Tracked in `docs/HANDOVERS/feat-docs-alignment.md`.
 
 1. Tracking and QA
 
@@ -74,33 +42,17 @@
 - Acceptance:
   - [ ] All issues linked in PRs; `just check` passes
 
-1. Signals and coordination
+1. Signals and coordination (moved to handover)
 
-- [ ] Add `signal_send`/`signal_recv` events to SSE stream; include `topic`, `message_id`, payload length.
-- [ ] Implement `signal_wait_any(topics[])` and `signal_wait_all(topics[])` tools.
-- [ ] Add topic namespace and allowlist policy (e.g., `signal:<team>/...`); enforce in tools.
-- [ ] Add per-topic payload caps, redaction of sensitive keys, and rate limits.
-- [ ] Persist `last_id` cursor in session for long waits and reliability across restarts.
-- Acceptance:
-  - [ ] SSE shows signal events in live runs
-  - [ ] wait_any/wait_all covered by unit tests
-  - [ ] Policy enforced; violations return actionable errors
+- Tracked in `docs/HANDOVERS/feat-signals-v2-policy-and-sse.md`.
 
-1. Team registry and file scope enforcement
+1. Team registry and file scope enforcement (moved to handover)
 
-- [ ] Define registry schema: agents, owners, window person, allowed file scopes, worktrees.
-- [ ] Enforce allowed file scopes in files tool and terminal tool.
-- Acceptance:
-  - [ ] Attempts outside scope are denied with clear reason
-  - [ ] Unit tests for scope enforcement pass
+- Tracked in `docs/HANDOVERS/feat-team-registry-and-scope-enforcement.md`.
 
-1. Worktree allocator
+1. Worktree allocator (moved to handover)
 
-- [ ] Create per-agent git worktree manager (create/cleanup; branch naming).
-- [ ] Map allowed file scopes to worktree; preflight conflicts.
-- Acceptance:
-  - [ ] Worktrees created per agent; cleanup verified
-  - [ ] Conflict preflight documented and tested
+- Tracked in `docs/HANDOVERS/feat-worktree-allocator.md`.
 
 ## Sequencing
 
@@ -114,7 +66,7 @@
 - Contracts remain stable (`Bus` interface unchanged). Async/offloading paths do not alter external APIs.
 - Use TDD where feasible (e.g., redaction tests first). Keep CI/readability aligned with `docs/refs/quality-gates.md`.
 
-1. Client v1 polish: `scripts/client.py` UX, modes, reliability
+1. Client v1 polish (moved to handover)
 
 - [ ] Add CLI flags
   - [ ] `--log-level {debug,info,warning,error}`
@@ -153,11 +105,4 @@
   - [ ] README usage for `--quiet`, `--json`, `--log-level`, `--max-events`, color behavior
   - [ ] Short "scripting patterns" (capture only final output, etc.)
 
-- Acceptance:
-  - [ ] New flags work as specified; help text includes exit codes
-  - [ ] Human output is colorized on TTY; plain on non-TTY/JSON
-  - [ ] `/send` failures return code `3`; timeouts return `2`
-  - [ ] Streaming uses connect timeout + backoff; no tight loops observed in tests
-  - [ ] One-shot stale cutoff robust to missing/invalid timestamps
-  - [ ] Tests added for modes and failure paths; all tests pass
-  - [ ] README updated with examples and scripting tips
+- Tracked in `docs/HANDOVERS/feat-client-v1-polish.md`.
