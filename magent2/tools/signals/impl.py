@@ -124,6 +124,73 @@ def _set_persisted_cursor(topic: str, last_id: str) -> None:
     slot[topic] = last_id
 
 
+def _prepare_topic_names(topics: list[str]) -> list[str]:
+    """Normalize, validate and enforce topic policy for a list of topics.
+
+    Ensures topics are stripped, non-empty, and allowed by prefix policy.
+    """
+    names = [(t or "").strip() for t in topics]
+    names = [n for n in names if n]
+    if not names:
+        raise ValueError("topics must be non-empty")
+    for name in names:
+        _require_allowed_topic(name)
+    return names
+
+
+def _fix_timeout_ms(timeout_ms: int) -> int:
+    """Ensure a minimum positive timeout in milliseconds."""
+    return timeout_ms if timeout_ms > 0 else 1
+
+
+def _deadline_from_timeout_ms(timeout_ms: int) -> float:
+    """Compute an absolute deadline time from a millisecond timeout."""
+    return time.time() + (timeout_ms / 1000.0)
+
+
+def _build_cursors(names: list[str], last_ids: dict[str, str] | None) -> dict[str, str | None]:
+    """Resolve initial cursors from explicit last_ids or persisted cursors."""
+    cursors: dict[str, str | None] = {}
+    for name in names:
+        explicit = (last_ids or {}).get(name) if last_ids else None
+        cursors[name] = explicit if explicit is not None else _get_persisted_cursor(name)
+    return cursors
+
+
+def _safe_payload_len(payload: dict[str, Any]) -> int:
+    """Best-effort serialized payload length for metrics/SSE."""
+    try:
+        return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    except Exception:  # pragma: no cover - defensive
+        return 0
+
+
+def _publish_signal_recv(topic: str, message_id: str, payload_len: int) -> None:
+    _maybe_publish_stream_event(
+        {
+            "event": "signal_recv",
+            "topic": topic,
+            "message_id": message_id,
+            "payload_len": payload_len,
+        }
+    )
+
+
+def _process_message_for_return(topic: str, message: BusMessage) -> dict[str, Any]:
+    """Redact payload, persist cursor, publish SSE and return standardized dict."""
+    message_payload = message.payload
+    redacted = _redacted_signal_message(message_payload)
+    _set_persisted_cursor(topic, message.id)
+    payload_len = _safe_payload_len(message_payload)
+    _publish_signal_recv(topic, message.id, payload_len)
+    return {"ok": True, "topic": topic, "message": redacted, "message_id": message.id}
+
+
+def _read_one(bus: Bus, topic: str, cursor: str | None) -> BusMessage | None:
+    items = list(bus.read(topic, last_id=cursor, limit=1))
+    return items[0] if items else None
+
+
 def send_signal(topic: str, payload: dict[str, Any]) -> dict[str, Any]:
     name = (topic or "").strip()
     if not name:
@@ -197,44 +264,17 @@ def wait_for_signal(topic: str, *, last_id: str | None, timeout_ms: int) -> dict
 def wait_for_any(
     topics: list[str], *, last_ids: dict[str, str] | None, timeout_ms: int
 ) -> dict[str, Any]:
-    names = [(t or "").strip() for t in topics]
-    names = [n for n in names if n]
-    if not names:
-        raise ValueError("topics must be non-empty")
-    for n in names:
-        _require_allowed_topic(n)
-    if timeout_ms <= 0:
-        timeout_ms = 1
+    names = _prepare_topic_names(topics)
+    timeout_ms = _fix_timeout_ms(timeout_ms)
     bus = _get_bus()
-    deadline = time.time() + (timeout_ms / 1000.0)
-    cursors: dict[str, str | None] = {}
-    for n in names:
-        explicit = (last_ids or {}).get(n) if last_ids else None
-        cursors[n] = explicit if explicit is not None else _get_persisted_cursor(n)
+    deadline = _deadline_from_timeout_ms(timeout_ms)
+    cursors = _build_cursors(names, last_ids)
     while True:
-        for n in names:
-            items = list(bus.read(n, last_id=cursors[n], limit=1))
-            if not items:
+        for name in names:
+            message = _read_one(bus, name, cursors[name])
+            if message is None:
                 continue
-            m = items[0]
-            message_payload = m.payload
-            redacted = _redacted_signal_message(message_payload)
-            _set_persisted_cursor(n, m.id)
-            try:
-                payload_len = len(
-                    json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
-                )
-            except Exception:
-                payload_len = 0
-            _maybe_publish_stream_event(
-                {
-                    "event": "signal_recv",
-                    "topic": n,
-                    "message_id": m.id,
-                    "payload_len": payload_len,
-                }
-            )
-            return {"ok": True, "topic": n, "message": redacted, "message_id": m.id}
+            return _process_message_for_return(name, message)
         if time.time() >= deadline:
             return {"ok": False, "topics": names, "timeout_ms": timeout_ms}
         time.sleep(0.05)
@@ -243,46 +283,19 @@ def wait_for_any(
 def wait_for_all(
     topics: list[str], *, last_ids: dict[str, str] | None, timeout_ms: int
 ) -> dict[str, Any]:
-    names = [(t or "").strip() for t in topics]
-    names = [n for n in names if n]
-    if not names:
-        raise ValueError("topics must be non-empty")
-    for n in names:
-        _require_allowed_topic(n)
-    if timeout_ms <= 0:
-        timeout_ms = 1
+    names = _prepare_topic_names(topics)
+    timeout_ms = _fix_timeout_ms(timeout_ms)
     bus = _get_bus()
-    deadline = time.time() + (timeout_ms / 1000.0)
-    cursors: dict[str, str | None] = {}
+    deadline = _deadline_from_timeout_ms(timeout_ms)
+    cursors = _build_cursors(names, last_ids)
     results: dict[str, dict[str, Any]] = {}
-    for n in names:
-        explicit = (last_ids or {}).get(n) if last_ids else None
-        cursors[n] = explicit if explicit is not None else _get_persisted_cursor(n)
     while True:
         remaining = [n for n in names if n not in results]
-        for n in remaining:
-            items = list(bus.read(n, last_id=cursors[n], limit=1))
-            if not items:
+        for name in remaining:
+            message = _read_one(bus, name, cursors[name])
+            if message is None:
                 continue
-            m = items[0]
-            message_payload = m.payload
-            redacted = _redacted_signal_message(message_payload)
-            _set_persisted_cursor(n, m.id)
-            try:
-                payload_len = len(
-                    json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
-                )
-            except Exception:
-                payload_len = 0
-            _maybe_publish_stream_event(
-                {
-                    "event": "signal_recv",
-                    "topic": n,
-                    "message_id": m.id,
-                    "payload_len": payload_len,
-                }
-            )
-            results[n] = {"ok": True, "topic": n, "message": redacted, "message_id": m.id}
+            results[name] = _process_message_for_return(name, message)
         if len(results) == len(names):
             return {"ok": True, "messages": results}
         if time.time() >= deadline:
