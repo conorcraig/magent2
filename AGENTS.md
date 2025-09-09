@@ -6,6 +6,7 @@
 
 ## Core Principles
 
+- **Requirements-driven**: Always read the PRD.md file BEFORE beginning any work so that you have proper context.
 - **User-first**: Execute the user's request end-to-end without unnecessary back-and-forth. Ask clarifying questions only when instructions are ambiguous or blocked.
 - **Surgical changes**: Make minimal, targeted edits. Do not reformat unrelated code or introduce speculative abstractions.
 - **TDD + correctness**: Prefer tests-first where practical. Respect existing tests, fixtures, and `conftest.py`. Fix failures before finishing.
