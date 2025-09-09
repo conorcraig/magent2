@@ -114,51 +114,29 @@
 
 ## Environment Setup
 
-- **Install uv**
-  - Linux/macOS:
+- Preferred: run the setup script
+  - This repository includes a non-interactive, user-space setup script that installs `uv`, installs `gh` into `$HOME/.local/bin`, authenticates `gh` using `GH_TOKEN`, and syncs Python dependencies if `pyproject.toml` exists.
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-exec $SHELL -l
-uv --version
+bash scripts/setup_env.sh
 ```
 
-- **Sync project dependencies**
+- Manual GH CLI install and auth (Linux, user-space)
+  - If you prefer to run the documented steps directly:
 ```bash
-uv sync
+# Install gh in user space
+VER=2.61.0
+ARCH=$(case "$(uname -m)" in x86_64) echo amd64 ;; aarch64|arm64) echo arm64 ;; *) echo amd64 ;; esac)
+curl -fsSL "https://github.com/cli/cli/releases/download/v${VER}/gh_${VER}_linux_${ARCH}.tar.gz" \
+  | tar -xz --strip-components=2 -C "$HOME/.local/bin" gh_${VER}_linux_${ARCH}/bin/gh
+
+# Verify
+~/.local/bin/gh --version
+
+# Cursor injects GH_TOKEN as secret
+echo "$GH_TOKEN" | ~/.local/bin/gh auth login --with-token
+~/.local/bin/gh auth status
 ```
 
-- **Install GitHub CLI (user-space, no sudo)**
-  - Download latest release tarball and place `gh` in `~/.local/bin`:
-```bash
-ARCH=$(uname -m); case "$ARCH" in x86_64) GH_ARCH=amd64 ;; aarch64|arm64) GH_ARCH=arm64 ;; *) GH_ARCH=amd64 ;; esac
-VER=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep -o '"tag_name": "v[^\"]*"' | head -n1 | sed 's/.*"v\([^\"]*\)".*/\1/')
-TMPDIR=$(mktemp -d)
-curl -fsSL "https://github.com/cli/cli/releases/download/v$VER/gh_${VER}_linux_${GH_ARCH}.tar.gz" -o "$TMPDIR/gh.tgz"
-tar -xzf "$TMPDIR/gh.tgz" -C "$TMPDIR"
-mkdir -p "$HOME/.local/bin"
-cp "$TMPDIR"/gh_*/bin/gh "$HOME/.local/bin/gh"
-chmod +x "$HOME/.local/bin/gh"
-export PATH="$HOME/.local/bin:$PATH"
-gh --version
-```
-
-- **Authenticate gh non-interactively**
-  - `gh` respects `GITHUB_TOKEN`. Export your PAT (or use an existing `GH_TOKEN`).
-```bash
-export GITHUB_TOKEN="$GH_TOKEN"  # or your PAT value
-gh auth status
-```
-
-- **Quick verification**
-```bash
-# Repo issues via gh
-gh issue list -R conorcraig/magent2 --limit 5
-gh issue view 71 -R conorcraig/magent2
-
-# uv health
-uv --version
-uv sync
-
-# If available in this repo
-just check
-```
+- Policy for GitHub interactions
+  - Use `gh` CLI by default for repo operations (issues, PRs, labels, etc.).
+  - Fall back to direct HTTPS API requests only if `gh` is unavailable.
