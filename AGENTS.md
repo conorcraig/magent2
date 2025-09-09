@@ -111,3 +111,54 @@
 - **Coding style**: Minimal, YAGNI; no commented-out or TODO code; preserve indentation and avoid unrelated reformatting.
 - **Security**: Never display `.env` or other secrets.
 - **Terminal**: Prefer absolute paths; simple commands; use `sleep` for waits.
+
+## Environment Setup
+
+- **Install uv**
+  - Linux/macOS:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+exec $SHELL -l
+uv --version
+```
+
+- **Sync project dependencies**
+```bash
+uv sync
+```
+
+- **Install GitHub CLI (user-space, no sudo)**
+  - Download latest release tarball and place `gh` in `~/.local/bin`:
+```bash
+ARCH=$(uname -m); case "$ARCH" in x86_64) GH_ARCH=amd64 ;; aarch64|arm64) GH_ARCH=arm64 ;; *) GH_ARCH=amd64 ;; esac
+VER=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep -o '"tag_name": "v[^\"]*"' | head -n1 | sed 's/.*"v\([^\"]*\)".*/\1/')
+TMPDIR=$(mktemp -d)
+curl -fsSL "https://github.com/cli/cli/releases/download/v$VER/gh_${VER}_linux_${GH_ARCH}.tar.gz" -o "$TMPDIR/gh.tgz"
+tar -xzf "$TMPDIR/gh.tgz" -C "$TMPDIR"
+mkdir -p "$HOME/.local/bin"
+cp "$TMPDIR"/gh_*/bin/gh "$HOME/.local/bin/gh"
+chmod +x "$HOME/.local/bin/gh"
+export PATH="$HOME/.local/bin:$PATH"
+gh --version
+```
+
+- **Authenticate gh non-interactively**
+  - `gh` respects `GITHUB_TOKEN`. Export your PAT (or use an existing `GH_TOKEN`).
+```bash
+export GITHUB_TOKEN="$GH_TOKEN"  # or your PAT value
+gh auth status
+```
+
+- **Quick verification**
+```bash
+# Repo issues via gh
+gh issue list -R conorcraig/magent2 --limit 5
+gh issue view 71 -R conorcraig/magent2
+
+# uv health
+uv --version
+uv sync
+
+# If available in this repo
+just check
+```
