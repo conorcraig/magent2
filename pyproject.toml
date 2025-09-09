@@ -37,6 +37,11 @@ no_implicit_optional = true
 strict_optional = true
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disable_error_code = ["annotation-unchecked"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-qq --disable-warnings --show-capture=no --tb=no -r fE --junitxml=reports/junit.xml --json-report --json-report-file=reports/pytest-report.json"
