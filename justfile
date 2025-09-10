@@ -70,3 +70,30 @@ rebuild:
 	docker compose down
 	docker compose build
 	docker compose up -d
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dev UX: Logs
+# ──────────────────────────────────────────────────────────────────────────────
+log:
+	# Open LazyDocker for an interactive logs view across services
+	@if command -v lazydocker >/dev/null 2>&1; then \
+	  printf "\033[1;36m==> Launching LazyDocker\033[0m\n"; \
+	  lazydocker; \
+	else \
+	  printf "\033[1;31mLazyDocker is not installed.\033[0m\n"; \
+	  printf "Install instructions: https://github.com/jesseduffield/lazydocker#installation\n"; \
+	  printf "Example (Linux):\n  curl -fsSL https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash\n"; \
+	  exit 127; \
+	fi
+
+logs-pretty:
+	# Pretty/color stream of all service logs using humanlog
+	@if command -v humanlog >/dev/null 2>&1; then \
+	  printf "\033[1;36m==> Streaming logs via humanlog\033[0m\n"; \
+	  docker compose logs -f --no-log-prefix | humanlog; \
+	else \
+	  printf "\033[1;31mhumanlog is not installed.\033[0m\n"; \
+	  printf "Install: https://humanlog.io/docs/integrations/structured-logging\n"; \
+	  printf "Alternative: pipe via jq ->  docker compose logs -f --no-log-prefix | jq -C .\n"; \
+	  exit 127; \
+	fi

@@ -37,17 +37,30 @@ class OpenAIAgentsRunner:
         self._session_order: deque[str] = deque()
         self._session_limit = max(1, session_limit)
         self._max_turns: int | None = int(max_turns) if max_turns is not None else None
-        # Optional persistent sessions (if the SDK provides SQLAlchemySession)
-        self._session_cls: Any | None = None
+        # Session backend configuration
+        # - BACKEND: auto | sqlalchemy | sqlite | none
+        # - DB URL for SQLAlchemy; PATH for SQLite
+        self._session_backend: str = (os.getenv("AGENT_SESSION_BACKEND", "auto") or "auto").strip().lower()
         self._session_db_url: str = os.getenv("AGENT_SESSION_DB_URL", "sqlite:///./agents.db")
-        try:  # Attempt import only once at init
-            from agents.extensions.memory.sqlalchemy_session import (
-                SQLAlchemySession,
-            )
+        self._sqlite_path: str = os.getenv("AGENT_SESSION_PATH", "./agents.db")
 
-            self._session_cls = SQLAlchemySession
+        # Optional persistent sessions (detect availability once)
+        self._sqlalchemy_session_cls: Any | None = None
+        self._sqlite_session_cls: Any | None = None
+        # Try SQLAlchemy-backed session first (optional extra in some installs)
+        try:
+            from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession
+
+            self._sqlalchemy_session_cls = SQLAlchemySession
         except Exception:
-            self._session_cls = None
+            self._sqlalchemy_session_cls = None
+        # Try built-in SQLite session (commonly available)
+        try:
+            from agents import SQLiteSession
+
+            self._sqlite_session_cls = SQLiteSession
+        except Exception:
+            self._sqlite_session_cls = None
 
     # ----------------------------
     # Public API (Runner protocol)
@@ -93,15 +106,19 @@ class OpenAIAgentsRunner:
             self._session_order.append(conversation_id)
             return self._sessions[conversation_id]
 
-        # Create a session if the SDK provides a concrete session class; else None
-        session: Any
-        if self._session_cls is not None:
-            try:
-                session = self._session_cls(self._session_db_url, key=conversation_id)
-            except Exception:
-                session = None
-        else:
+        # Create a session per configured/available backend
+        session: Any = None
+
+        backend = self._session_backend
+        if backend == "none":
             session = None
+        elif backend == "sqlalchemy":
+            session = self._try_create_sqlalchemy_session(conversation_id) or self._try_create_sqlite_session(conversation_id)
+        elif backend == "sqlite":
+            session = self._try_create_sqlite_session(conversation_id) or self._try_create_sqlalchemy_session(conversation_id)
+        else:  # auto (prefer simple local SQLite first for dev convenience)
+            session = self._try_create_sqlite_session(conversation_id) or self._try_create_sqlalchemy_session(conversation_id)
+
         self._sessions[conversation_id] = session
         self._session_order.append(conversation_id)
         if len(self._sessions) > self._session_limit:
@@ -111,6 +128,28 @@ class OpenAIAgentsRunner:
             except KeyError:
                 pass
         return session
+
+    # ----------------------------
+    # Session creators (best-effort)
+    # ----------------------------
+    def _try_create_sqlalchemy_session(self, conversation_id: str) -> Any:
+        cls = self._sqlalchemy_session_cls
+        if cls is None:
+            return None
+        try:
+            return cls(self._session_db_url, key=conversation_id)
+        except Exception:
+            return None
+
+    def _try_create_sqlite_session(self, conversation_id: str) -> Any:
+        cls = self._sqlite_session_cls
+        if cls is None:
+            return None
+        try:
+            # SQLiteSession(key: str, path: str)
+            return cls(conversation_id, self._sqlite_path)
+        except Exception:
+            return None
 
     async def _run_streaming(
         self,

@@ -94,6 +94,49 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
+class ConsoleLogFormatter(logging.Formatter):
+    def __init__(self) -> None:
+        super().__init__("%(message)s")
+
+    @staticmethod
+    def _shorten(value: str | None, *, n: int = 8) -> str:
+        if not value:
+            return "-"
+        return value[:n]
+
+    def format(self, record: logging.LogRecord) -> str:  # noqa: D401
+        # Base fields
+        ts = _iso_now()[11:19]  # HH:MM:SS
+        level = record.levelname.upper()
+        name = record.name
+        msg = record.getMessage()
+
+        # Extras (if present)
+        run_id = getattr(record, "run_id", None)
+        conv_id = getattr(record, "conversation_id", None)
+        event = getattr(record, "event", None)
+        agent = getattr(record, "agent", None)
+
+        parts: list[str] = [ts, level, name]
+        if event:
+            parts.append(str(event))
+        if agent:
+            parts.append(f"agent={agent}")
+        if conv_id:
+            parts.append(f"conv={self._shorten(str(conv_id))}")
+        if run_id:
+            parts.append(f"run={self._shorten(str(run_id))}")
+        parts.append("-")
+        parts.append(msg)
+        return " ".join(parts)
+
+
+def _choose_formatter() -> logging.Formatter:
+    format_pref = (os.getenv("LOG_FORMAT") or "").strip().lower() or "json"
+    if format_pref == "console":
+        return ConsoleLogFormatter()
+    return JsonLogFormatter()
+
 def _parse_level(value: str | None, default: int = logging.INFO) -> int:
     name = (value or "").strip().upper()
     if not name:
@@ -124,7 +167,7 @@ def get_json_logger(name: str = "magent2") -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler(stream=sys.stdout)
-        handler.setFormatter(JsonLogFormatter())
+        handler.setFormatter(_choose_formatter())
         logger.addHandler(handler)
         logger.setLevel(_level_for_logger(name))
         logger.propagate = False

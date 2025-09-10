@@ -121,6 +121,16 @@ curl -N http://localhost:8000/stream/conv1
 - Pre-commit (staged files): `uv run pre-commit run`
 - Full local quality gate: `just check`
 
+### Logs (developer UX)
+
+- Interactive logs across all containers:
+
+```bash
+just log
+```
+
+Requires LazyDocker. Install: https://github.com/jesseduffield/lazydocker#installation
+
 ### Client CLI (one-shot and streaming)
 
 Send a single message and exit after the final output:
