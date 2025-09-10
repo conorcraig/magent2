@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 import uvicorn
 
@@ -14,11 +14,11 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, os.pardir))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from magent2.bus.interface import Bus, BusMessage
-from magent2.gateway.app import create_app
-from magent2.runner.config import load_config
-from magent2.worker.__main__ import EchoRunner
-from magent2.worker.worker import Worker
+from magent2.bus.interface import Bus, BusMessage  # noqa: E402
+from magent2.gateway.app import create_app  # noqa: E402
+from magent2.runner.config import load_config  # noqa: E402
+from magent2.worker.__main__ import EchoRunner  # noqa: E402
+from magent2.worker.worker import Worker  # noqa: E402
 
 
 class InProcessBus(Bus):
@@ -110,4 +110,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

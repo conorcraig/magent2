@@ -148,13 +148,20 @@ def build_runner_from_env() -> Runner:
 
 def main() -> None:
     cfg = load_config()
-    # Configure a consumer group with a reasonable default and enable blocking reads
-    bus = RedisBus(
-        redis_url=os.getenv("REDIS_URL"),
-        group_name="magent2",
-        consumer_name=f"worker-{uuid.uuid4()}",
-        block_ms=1000,
-    )
+    # Use consumer groups by default; allow disabling for simple local dev
+    use_groups_raw = os.getenv("WORKER_USE_GROUPS", "1").strip().lower()
+    use_groups = use_groups_raw not in {"0", "false", "no", "off"}
+    if use_groups:
+        # Configure a consumer group with a reasonable default and enable blocking reads
+        bus = RedisBus(
+            redis_url=os.getenv("REDIS_URL"),
+            group_name="magent2",
+            consumer_name=f"worker-{uuid.uuid4()}",
+            block_ms=1000,
+        )
+    else:
+        # Simple tail-based reads without consumer groups
+        bus = RedisBus(redis_url=os.getenv("REDIS_URL"))
     runner: Runner = build_runner_from_env()
     worker = Worker(agent_name=cfg.agent_name, bus=bus, runner=runner)
     # Simple loop: poll until interrupted
