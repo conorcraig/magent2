@@ -33,3 +33,6 @@ pr_diffs/
 # databases and local sessions
 *.db
 .sessions/
+
+# local cache for temporary downloads
+.cache/
