@@ -65,3 +65,8 @@ up +args:
 
 down +args:
 	docker compose down {{args}}
+
+rebuild:
+	docker compose down
+	docker compose build
+	docker compose up -d
