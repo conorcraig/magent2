@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from datetime import UTC, datetime
 
 from magent2.bus.interface import Bus, BusMessage
 from magent2.observability import get_json_logger, get_metrics

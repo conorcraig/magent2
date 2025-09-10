@@ -64,7 +64,7 @@ def test_gateway_worker_docker_e2e(docker_services: Any) -> None:
     )
     assert r.status_code == 200, r.text
 
-    # Stream two events via SSE
+    # Stream first two events via SSE (expect user_message then token or output depending on runner)
     sse = requests.get(
         f"http://localhost:{port}/stream/{conv_id}?max_events=2",
         stream=True,
@@ -75,5 +75,7 @@ def test_gateway_worker_docker_e2e(docker_services: Any) -> None:
     seen = collect_sse_events(sse, max_events=2, timeout_s=15.0)
 
     assert len(seen) == 2, f"expected 2 events, got {seen}"
-    assert seen[0]["event"] == "token"
-    assert seen[1]["event"] == "output"
+    # First event should be the synthetic user_message emitted by the Gateway
+    assert seen[0]["event"] == "user_message"
+    # Second event should be either a token (streaming) or output (non-streaming runner)
+    assert seen[1]["event"] in {"token", "output"}
