@@ -127,3 +127,68 @@ OpenAI Agents SDK Docs:
 - Guardrails: <https://openai.github.io/openai-agents-python/guardrails/>
 - Tracing: <https://openai.github.io/openai-agents-python/tracing/>
 - Cookbooks: <https://github.com/openai/openai-agents-python/tree/main/cookbooks>
+
+---
+
+## Walkthrough of `scripts/example_agent.py`
+
+### Local context (`AppCtx`)
+
+- Private Python state passed via `context` to runs.
+- Accessed by tools through `RunContextWrapper[AppCtx]`.
+
+### Typed outputs (`Answer`, `TriagedTask`)
+
+- Pydantic models for structured outputs; set on agents via `output_type`.
+
+### Tools
+
+- `@function_tool get_pref(w, key)` and `fetch_internal(w, query)` read from `AppCtx`.
+- `add(a, b)` demonstrates a simple deterministic tool.
+
+### Dynamic instructions
+
+- `dyn_instructions(w, agent) -> str` builds system text at run time from context (tone/units).
+
+### Specialist agents
+
+- `research_agent`: uses `WebSearchTool()` + `fetch_internal`; returns `Answer`.
+- `math_agent`: uses `add`; deterministic (temperature 0).
+- `writer_agent`: uses `get_pref`; returns `Answer`.
+
+### Orchestration
+
+- Agents-as-tools: `research_agent.as_tool(...)`, `math_agent.as_tool(...)`, `writer_agent.as_tool(...)`.
+- Handoff: `handoff(writer_agent)` for ownership transfer when heavy rewriting is needed.
+
+### Guardrails
+
+- Input: `no_homework` calls a classifier agent; trips if homework is detected.
+- Output: `require_sources_if_web` checks web reliance implies non-empty sources.
+- Exceptions handled: `InputGuardrailTripwireTriggered`, `OutputGuardrailTripwireTriggered`.
+
+### Streaming & tracing
+
+- `Runner.run_streamed(...)` with event handlers for tool calls, outputs, and agent updates.
+- Tracing spans via `trace(...)` and `custom_span(...)` around the demo workflow.
+
+### Sessions
+
+- `SQLiteSession("thread-007", "multi_agent_history.db")` preserves conversation.
+- Pass the session to `Runner.run_streamed(..., session=session)` for memory.
+
+---
+
+## Practical extensions
+
+1. Add a retrieval tool (e.g., file search) and expose it to `research_agent`.
+2. Add a `SQLAlchemySession` for multi-user/server deployments (if available).
+3. Extend guardrails for domain policies (e.g., PII/PHI checks, compliance rules).
+4. Capture and log usage metadata from `RunResult.usage` for analytics.
+
+---
+
+## Version notes & portability
+
+- Some symbols vary by version (e.g., `RunContextWrapper`, persistent sessions). Guard optional imports.
+- Prefer capability checks over strict type equality for stream event handling.

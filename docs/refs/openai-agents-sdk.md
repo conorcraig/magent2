@@ -272,3 +272,163 @@ def safe_echo(text: str) -> str:
 Tip:
 
 - Prefer raising `ValueError` for input validation issues so the SDK surfaces a clear tool error.
+
+---
+
+## API quick reference (Python)
+
+### Agent
+
+- Constructor fields (common):
+  - `name: str`
+  - `instructions: str | Callable[[RunContextWrapper, AgentBase], str]`
+  - `model: str` (e.g., `"gpt-4o-mini"`)
+  - `tools: list[Callable]` (decorated with `@function_tool` or `agent.as_tool(...)`)
+  - `handoffs: list[Agent]` (use `handoff(other_agent)` when needed)
+  - `output_type: type[BaseModel] | None` (Pydantic for structured output)
+  - `model_settings: ModelSettings` (e.g., `temperature: float`)
+  - `input_guardrails: list[Callable]`, `output_guardrails: list[Callable]`
+
+### Runner
+
+- `Runner.run_sync(agent, input, context=None, session=None, run_config=None)`
+- `await Runner.run(agent, input, context=None, session=None, run_config=None)`
+- `Runner.run_streamed(agent, input, context=None, session=None, run_config=None)` → returns a streamed run handle with `stream_events()` and `get_final_result()`
+
+### Sessions
+
+- `SQLiteSession(key: str, path: str)`
+- `SQLAlchemySession(url: str, key: str)` (if available in your version)
+- `OpenAIConversationsSession(key: str)` (if available/installed)
+
+Notes:
+
+- Sessions prepend history and append new items automatically.
+- Reuse the same session instance (by `key`) for multi-agent collaboration.
+
+### ModelSettings (common)
+
+- `temperature: float = 0.0..1.0`
+- Optional: `max_output_tokens`, `stop`, provider-specific options (check your installed SDK version).
+
+---
+
+## Event taxonomy (streaming)
+
+Common `ev.type` values when iterating `run_streamed(...).stream_events()`:
+
+- `raw_response_event`
+  - Low-level token deltas from the underlying Responses API.
+  - Often typed as `ResponseTextDeltaEvent` (Python import shown above).
+- `run_item_stream_event`
+  - High-level agent steps. The `ev.data`/`ev.item` typically represents one of:
+    - tool invocation (name + args)
+    - tool result (result or a summarized output)
+    - assistant message chunk or final assistant message
+- `agent_updated_stream_event`
+  - Indicates an agent handoff or agent definition change in-flight.
+
+Mapping guidance for local UIs:
+
+- Token stream → accumulate `raw_response_event` text deltas for typing effect.
+- Tool steps → render name + compact args, then summarize result on completion.
+- Final output → use `await streamed.get_final_result()` for structured `final_output`.
+
+---
+
+## Hosted tools cheat sheet
+
+- `WebSearchTool()`
+  - Quick access to web search/results (Responses-model hosted capability).
+  - Ensure outputs include citations when your policies require it.
+- `FileSearchTool()`
+  - Index/search local or remote files (check version/docs for setup needs).
+- `ComputerUse`
+  - Programmatic computer interaction (advanced; verify availability and safety settings).
+
+Add hosted tools to `Agent(tools=[...])` like any function tool. Keep inputs/outputs simple and JSON-serializable.
+
+---
+
+## Guardrails quick recipes
+
+### Input guardrail
+
+```python
+from agents import input_guardrail, GuardrailFunctionOutput, Runner
+
+@input_guardrail
+async def block_pii(w, agent, input):
+    # Call a classifier agent or do a fast heuristic
+    # Return tripwire_triggered=True to block
+    flagged = False
+    return GuardrailFunctionOutput(output_info={"flagged": flagged}, tripwire_triggered=flagged)
+```
+
+### Output guardrail
+
+```python
+from agents import output_guardrail, GuardrailFunctionOutput
+
+@output_guardrail
+async def require_sources(w, agent, output):
+    has_sources = bool(getattr(output, "sources", None))
+    return GuardrailFunctionOutput(output_info={"has_sources": has_sources}, tripwire_triggered=not has_sources)
+```
+
+Exceptions to catch around runs:
+
+- `InputGuardrailTripwireTriggered`
+- `OutputGuardrailTripwireTriggered`
+
+---
+
+## Sessions matrix (when to use what)
+
+- Local dev / single-user: `SQLiteSession(key, path)`
+- Multi-user / server: `SQLAlchemySession(db_url, key)` (if supported)
+- Hosted conversations: `OpenAIConversationsSession(key)` (if supported)
+
+Operational tips:
+
+- Use stable `key` per conversation/thread.
+- Share sessions across collaborating agents for coherent history.
+
+---
+
+## Tracing & spans
+
+```python
+from agents import trace, custom_span, RunConfig, Runner
+
+with trace("MyFlow", metadata={"tenant": "acme"}):
+    with custom_span("loading"):
+        pass
+    result = Runner.run_sync(agent, "hello")
+```
+
+Per-run config (disable tracing or sensitive data):
+
+```python
+run_config = RunConfig(tracing_disabled=False, trace_include_sensitive_data=False)
+Runner.run_streamed(agent, input="...", run_config=run_config)
+```
+
+---
+
+## MCP, realtime, and voice
+
+- MCP (Model Context Protocol): run external tools/providers via MCP servers (see `/ref/mcp/`).
+- Realtime & Voice: see `/ref/realtime/*` and `/ref/voice/*` for events, models, and pipelines.
+
+Notes:
+
+- Event shapes and capabilities can vary by version; prefer feature checks over strict type matches.
+
+---
+
+## Version notes
+
+- This reference assumes `openai-agents>=0.2.11`.
+- Some symbols (e.g., `RunContextWrapper`, `SQLAlchemySession`) may not exist in older installs; guard imports.
+- When in doubt, consult the upstream docs tree linked at the top and adapt examples to your installed version.
