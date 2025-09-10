@@ -137,6 +137,7 @@ def _choose_formatter() -> logging.Formatter:
         return ConsoleLogFormatter()
     return JsonLogFormatter()
 
+
 def _parse_level(value: str | None, default: int = logging.INFO) -> int:
     name = (value or "").strip().upper()
     if not name:
