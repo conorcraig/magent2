@@ -215,6 +215,14 @@ Environment variables:
 - `AGENT_TOOLS` (comma-separated tool names; currently unused/no-op, reserved for follow-ups)
 - `OPENAI_API_KEY` (if set, the Worker uses the OpenAI Agents SDK runner; if unset, it falls back to EchoRunner for local/dev)
 
+Sessions:
+
+- The runner uses a single session strategy across environments:
+  - If `SQLiteSession` is available in the installed Agents SDK, it persists conversation history to a local SQLite file at `AGENT_SESSION_PATH`.
+  - If `SQLiteSession` is unavailable, runs proceed without persistence (history is not stored).
+- `AGENT_SESSION_PATH` (default `./.sessions/agents.db`) controls the SQLite file location. The directory is created on demand.
+- `*.db` files and the `.sessions/` directory are ignored by git.
+
 At startup, the Worker selects the runner based on `OPENAI_API_KEY` and logs the choice (Echo vs OpenAI) with the agent name/model.
 
 ### Terminal tool (policy via env)

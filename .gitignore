@@ -29,3 +29,7 @@ pr_diffs/
 
 # local deps installed during testing
 .pydeps/
+
+# databases and local sessions
+*.db
+.sessions/
