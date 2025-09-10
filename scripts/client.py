@@ -44,8 +44,10 @@ class StreamPrinter:
         # One-shot coordination: set when a final OutputEvent is observed
         self._final_event = threading.Event()
         self._final_text: str | None = None
-        # Optional cutoff: ignore events older than this timestamp (ISO 8601 in data)
+        # Optional cutoff: ignore events older than this timestamp
+        # We track both the original ISO string and a parsed unix timestamp for robust comparisons
         self._since_iso: str | None = None
+        self._since_ts: float | None = None
         # Track AI turn token streaming to avoid duplicating final text
         self._saw_tokens = False
         self._printed_ai_header = False
@@ -150,14 +152,31 @@ class StreamPrinter:
             and self._events_seen >= int(self._cfg.max_events)
         )
 
-    def _is_stale(self, data: dict[str, Any]) -> bool:
-        if not self._since_iso:
-            return False
-        ev_created = str(data.get("created_at", ""))
+    def _parse_iso_to_ts(self, value: str) -> float | None:
+        """Best-effort ISO8601 → unix timestamp.
+
+        Accepts both offset formats (e.g. +00:00) and 'Z' UTC designator.
+        Returns None on failure.
+        """
+        if not value:
+            return None
         try:
-            return bool(ev_created and ev_created < self._since_iso)
+            # Normalize Z to explicit UTC offset to satisfy fromisoformat
+            v = value.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(v)
+            return dt.timestamp()
         except Exception:
-            return True
+            return None
+
+    def _is_stale(self, data: dict[str, Any]) -> bool:
+        if self._since_ts is None:
+            return False
+        ev_created_raw = str(data.get("created_at", ""))
+        ev_ts = self._parse_iso_to_ts(ev_created_raw)
+        if ev_ts is None:
+            # If we cannot parse, err on the side of not dropping the event
+            return False
+        return ev_ts < float(self._since_ts)
 
     def _log_http_error(self, status_code: int) -> None:
         if not (self._cfg.quiet or self._cfg.json):
@@ -445,8 +464,9 @@ def one_shot(cfg: ClientConfig, message: str, timeout: float) -> int:
     Returns exit code: 0 on success, non-zero on timeout or send error.
     """
     stream = StreamPrinter(cfg)
-    # Set a cutoff so we ignore stale events; we choose now-100ms to account for clock skew
+    # Set a cutoff so we ignore stale events; choose now-100ms to account for clock skew
     cutoff = datetime.now(UTC).timestamp() - 0.1
+    stream._since_ts = cutoff
     stream._since_iso = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
     stream.start()
     # Verify we can connect to the stream promptly; otherwise treat as connect failure (exit 4)
