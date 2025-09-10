@@ -7,7 +7,7 @@ import sys
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -21,25 +21,68 @@ def docker_compose_file(pytestconfig: pytest.Config) -> str:
     return os.path.join(str(pytestconfig.rootpath), "docker-compose.yml")
 
 
+def _wait_until(timeout_s: float, pause_s: float, check: Callable[[], bool]) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if check():
+            return True
+        time.sleep(pause_s)
+    return False
+
+
+def _redis_ping(url: str) -> bool:
+    try:
+        import redis
+
+        r = redis.Redis.from_url(url)
+        return bool(r.ping())
+    except Exception:
+        return False
+
+
+def _local_redis_available() -> bool:
+    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    return _redis_ping(url)
+
+
 @pytest.fixture(scope="session")
-def redis_url(docker_services: Any) -> str:
-    # Ensure Redis is up via docker_services
-    def _ping() -> bool:
-        try:
-            import redis
+def redis_url(pytestconfig: pytest.Config, docker_services: Any) -> str:
+    """Provide a Redis URL, preferring local/ENV when available, otherwise Docker.
 
-            # Resolve mapped host port dynamically
-            port = docker_services.port_for("redis", 6379)
-            r = redis.Redis.from_url(f"redis://localhost:{port}/0")
-            return bool(r.ping())
-        except Exception:
-            return False
+    Priority:
+    1) REDIS_URL env if reachable
+    2) localhost:6379 if reachable
+    3) pytest-docker services (if Docker available)
+    """
 
-    # pytest-docker waits until responsive
-    docker_services.wait_until_responsive(timeout=60.0, pause=0.5, check=_ping)
-    # Return resolved URL
-    port = docker_services.port_for("redis", 6379)
-    return f"redis://localhost:{port}/0"
+    # 1) Respect explicit REDIS_URL if reachable
+    env_url = os.getenv("REDIS_URL")
+    if env_url:
+        ok = _wait_until(10.0, 0.2, lambda: _redis_ping(env_url))
+        if ok:
+            return env_url
+
+    # 2) Try default local Redis
+    local_url = "redis://localhost:6379/0"
+    if _wait_until(3.0, 0.2, lambda: _redis_ping(local_url)):
+        return local_url
+
+    # 3) Fall back to Docker if available
+    if _docker_available():
+        def _ping() -> bool:
+            try:
+                import redis
+
+                port = docker_services.port_for("redis", 6379)
+                return bool(redis.Redis.from_url(f"redis://localhost:{port}/0").ping())
+            except Exception:
+                return False
+
+        docker_services.wait_until_responsive(timeout=60.0, pause=0.5, check=_ping)
+        port = docker_services.port_for("redis", 6379)
+        return f"redis://localhost:{port}/0"
+
+    pytest.skip("Redis not available locally and Docker not available; skipping Redis-dependent tests")
 
 
 @pytest.fixture()
@@ -74,29 +117,31 @@ def _docker_available() -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Auto-skip tests that require Docker if Docker isn't available.
+    """Auto-skip tests that require unavailable external deps.
 
-    We treat tests as Docker-dependent if they:
-    - are marked with the 'docker' marker, or
-    - use fixtures that depend on Docker (e.g., 'docker_services' or 'redis_url').
+    - Always skip tests marked 'docker' if Docker is unavailable.
+    - Skip tests that explicitly require 'docker_services' if Docker is unavailable.
+    - Do NOT skip tests using 'redis_url' if a local Redis is reachable or REDIS_URL is set.
     """
-    if _docker_available():
-        return
-
-    skip_marker = pytest.mark.skip(reason="Docker not available; skipping docker-dependent tests")
+    docker_ok = _docker_available()
+    redis_ok = _local_redis_available()
 
     for item in items:
         # Direct markers
-        if "docker" in item.keywords:
-            item.add_marker(skip_marker)
+        if "docker" in item.keywords and not docker_ok:
+            item.add_marker(pytest.mark.skip(reason="Docker not available; skipping docker-marked test"))
             continue
 
         # Direct fixture usage
         fixt_names = set(getattr(item, "fixturenames", []) or [])
-
-        # Include transitive fixture dependencies if available
         closure = set(getattr(getattr(item, "_fixtureinfo", None), "names_closure", []) or [])
         all_fixtures = fixt_names | closure
 
-        if {"docker_services", "redis_url"} & all_fixtures:
-            item.add_marker(skip_marker)
+        # If a test explicitly uses docker_services, require Docker
+        if "docker_services" in all_fixtures and not docker_ok:
+            item.add_marker(pytest.mark.skip(reason="Docker not available; skipping docker_services test"))
+            continue
+
+        # If a test uses redis_url, allow it when local Redis/ENV is available
+        if "redis_url" in all_fixtures and not (redis_ok or docker_ok or os.getenv("REDIS_URL")):
+            item.add_marker(pytest.mark.skip(reason="Redis not available; set REDIS_URL or start local Redis"))

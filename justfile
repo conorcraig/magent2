@@ -104,3 +104,27 @@ logs-pretty:
 local:
 	# Run FastAPI gateway (port 8000) and worker using an in-process bus
 	uv run python scripts/run_local.py
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Local (3 processes): Redis + Gateway + Worker
+# ──────────────────────────────────────────────────────────────────────────────
+redis:
+	# Start a local Redis server in foreground
+	@if command -v redis-server >/dev/null 2>&1; then \
+	  echo "Starting redis-server on 6379"; \
+	  redis-server --port 6379; \
+	else \
+	  echo "redis-server not found. Install via your package manager."; \
+	  exit 127; \
+	fi
+
+gateway:
+	# Run FastAPI gateway bound to 0.0.0.0:8000
+	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
+	uv run uvicorn magent2.gateway.asgi:app --host 0.0.0.0 --port 8000 \
+	  --log-level info --no-access-log
+
+worker:
+	# Run the worker loop (EchoRunner if no OPENAI_API_KEY)
+	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
+	uv run python -m magent2.worker
