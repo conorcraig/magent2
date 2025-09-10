@@ -63,6 +63,22 @@ uv sync
 cp .env.example .env  # set REDIS_URL; set OPENAI_API_KEY if using real Agents SDK
 ```
 
+### Run locally without Docker (no external services)
+
+- Single process (gateway + worker, in‑memory bus):
+
+```bash
+uv venv
+uv sync
+just local
+# gateway: http://localhost:8000/health
+```
+
+Notes:
+
+- This mode uses a thread‑safe in‑process bus, so no Redis is required.
+- If `OPENAI_API_KEY` is set, the worker uses the OpenAI Agents SDK; otherwise it runs the Echo runner.
+
 ### Run locally with uv
 
 - Start Redis (Compose):

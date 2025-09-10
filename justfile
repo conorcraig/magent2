@@ -97,3 +97,10 @@ logs-pretty:
 	  printf "Alternative: pipe via jq ->  docker compose logs -f --no-log-prefix | jq -C .\n"; \
 	  exit 127; \
 	fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Local (no Docker): gateway + worker in one process
+# ──────────────────────────────────────────────────────────────────────────────
+local:
+	# Run FastAPI gateway (port 8000) and worker using an in-process bus
+	uv run python scripts/run_local.py
