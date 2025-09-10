@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from datetime import UTC, datetime
 
 from magent2.bus.interface import Bus, BusMessage
 from magent2.observability import get_json_logger, get_metrics
@@ -69,7 +70,29 @@ def create_app(bus: Bus) -> FastAPI:
                     )
                     raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
-        # Do not emit a synthetic user_message event here to keep stream ordering predictable
+        # Publish a stream-visible user_message event so clients can render inbound messages
+        try:
+            stream_topic = f"stream:{message.conversation_id}"
+            user_event = {
+                "event": "user_message",
+                "conversation_id": message.conversation_id,
+                "sender": message.sender,
+                "text": message.content,
+                # RFC3339 timestamp for client-side staleness filtering
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=user_event))
+        except Exception as exc:
+            logger.error(
+                "gateway send error",
+                extra={
+                    "event": "gateway_error",
+                    "path": "send",
+                    "conversation_id": message.conversation_id,
+                    "stage": "stream_user_message",
+                },
+            )
+            raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         logger.info(
             "gateway send",
