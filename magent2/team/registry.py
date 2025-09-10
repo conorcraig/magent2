@@ -11,7 +11,6 @@ class AgentRecord:
     team_name: str
     responsibilities: list[str] = field(default_factory=list)
     allowed_paths: list[str] = field(default_factory=list)
-    worktree_dir: str | None = None
 
 
 class TeamRegistry:
@@ -47,14 +46,12 @@ class TeamRegistry:
         agent_name: str,
         responsibilities: list[str] | None = None,
         allowed_paths: list[str] | None = None,
-        worktree_dir: str | None = None,
     ) -> AgentRecord:
         record = AgentRecord(
             agent_name=agent_name,
             team_name=team_name,
             responsibilities=list(responsibilities or []),
             allowed_paths=[_normalize_path(p) for p in (allowed_paths or [])],
-            worktree_dir=worktree_dir,
         )
         self._agents_by_name[agent_name] = record
         return record
@@ -65,15 +62,12 @@ class TeamRegistry:
         *,
         responsibilities: list[str] | None = None,
         allowed_paths: list[str] | None = None,
-        worktree_dir: str | None = None,
     ) -> AgentRecord:
         record = self._require_agent(agent_name)
         if responsibilities is not None:
             record.responsibilities = list(responsibilities)
         if allowed_paths is not None:
             record.allowed_paths = [_normalize_path(p) for p in allowed_paths]
-        if worktree_dir is not None:
-            record.worktree_dir = worktree_dir
         return record
 
     def get_agent(self, agent_name: str) -> AgentRecord | None:
