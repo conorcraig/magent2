@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import random
+import time
+import traceback
 import uuid
 from collections.abc import Iterable
 from typing import Any, Protocol
@@ -34,6 +37,9 @@ class Worker:
         self._bus = bus
         self._runner = runner
         self._last_inbound_id: str | None = None
+        # In-memory fallbacks for idempotency and single-flight when Redis is not available
+        self._processed_by_conversation: dict[str, set[str]] = {}
+        self._locks_in_memory: set[str] = set()
 
     @property
     def agent_name(self) -> str:
@@ -62,7 +68,21 @@ class Worker:
             if envelope.conversation_id in processed_conversations:
                 continue
 
-            self._run_and_stream(envelope)
+            # Idempotency: skip if this message id was already processed
+            if self._already_processed(envelope.conversation_id, envelope.id):
+                continue
+
+            # Single-flight across drains: acquire a short-lived lock
+            if not self._acquire_lock(envelope.conversation_id):
+                # Another drain/worker is processing this conversation; skip
+                continue
+
+            try:
+                self._run_and_stream_with_retry(envelope)
+                # Mark processed regardless of success to avoid hot-looping; on failure we DLQ
+                self._mark_processed(envelope.conversation_id, envelope.id)
+            finally:
+                self._release_lock(envelope.conversation_id)
             processed_conversations.add(envelope.conversation_id)
             processed_count += 1
             last_processed_id = msg.id
@@ -119,7 +139,8 @@ class Worker:
                     "runs_errored",
                     {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
                 )
-                return
+                # Re-raise so the retry/DLQ policy can handle terminal failures
+                raise
             finally:
                 if not errored:
                     logger.info(
@@ -138,3 +159,128 @@ class Worker:
                             "conversation_id": envelope.conversation_id,
                         },
                     )
+
+    # --- Enhancements for robustness (Issue #38) ---
+    def _run_and_stream_with_retry(self, envelope: MessageEnvelope) -> bool:
+        """Run with bounded retries and jittered backoff. Publish to DLQ on terminal failure.
+
+        Returns True on success, False on terminal failure.
+        """
+        max_attempts = 3
+        base_sleep = 0.1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._run_and_stream(envelope)
+                return True
+            except Exception:
+                # _run_and_stream already logged and incremented metrics on failure
+                if attempt >= max_attempts:
+                    self._publish_to_dlq(envelope)
+                    return False
+                # Jittered exponential backoff
+                sleep_seconds = min(1.0, base_sleep * (2 ** (attempt - 1)))
+                jitter = random.uniform(0.0, 0.05)
+                time.sleep(sleep_seconds + jitter)
+
+        # Should not reach here
+        return False
+
+    def _publish_to_dlq(self, envelope: MessageEnvelope) -> None:
+        """Publish the failed envelope to a dead-letter queue topic.
+
+        Topic: dlq:{agent_name}
+        """
+        try:
+            dlq_topic = f"dlq:{self._agent_name}"
+            payload: dict[str, Any] = {
+                "event": "dead_letter",
+                "agent": self._agent_name,
+                "conversation_id": envelope.conversation_id,
+                "envelope": envelope.model_dump(mode="json"),
+            }
+            # Attach a concise error trace if available
+            payload["error"] = traceback.format_exc(limit=5)
+            self._bus.publish(dlq_topic, BusMessage(topic=dlq_topic, payload=payload))
+        except Exception:
+            # Best-effort DLQ; do not raise
+            get_json_logger("magent2").exception("dlq publish failed")
+
+    def _get_redis_client(self) -> Any | None:
+        """Return underlying redis client if bus is a RedisBus, else None."""
+        try:
+            from magent2.bus.redis_adapter import RedisBus  # local import to avoid hard dep
+
+            if isinstance(self._bus, RedisBus):
+                return self._bus._redis
+        except Exception:
+            return None
+        return None
+
+    def _already_processed(self, conversation_id: str, message_id: str) -> bool:
+        # Redis-backed idempotency when available
+        client = self._get_redis_client()
+        key = f"processed:{self._agent_name}:{conversation_id}"
+        if client is not None:
+            try:
+                added = client.sadd(key, message_id)
+                # Ensure TTL exists (set if not present)
+                try:
+                    ttl = int(client.ttl(key))
+                except Exception:
+                    ttl = -2
+                if ttl is None or ttl < 0:
+                    client.expire(key, 60 * 60 * 24)
+                # If SADD returns 0, it was already present
+                return added == 0
+            except Exception:
+                pass
+        # In-memory fallback
+        seen = self._processed_by_conversation.setdefault(conversation_id, set())
+        if message_id in seen:
+            return True
+        return False
+
+    def _mark_processed(self, conversation_id: str, message_id: str) -> None:
+        client = self._get_redis_client()
+        key = f"processed:{self._agent_name}:{conversation_id}"
+        if client is not None:
+            try:
+                client.sadd(key, message_id)
+                try:
+                    ttl = int(client.ttl(key))
+                except Exception:
+                    ttl = -2
+                if ttl is None or ttl < 0:
+                    client.expire(key, 60 * 60 * 24)
+                return
+            except Exception:
+                pass
+        self._processed_by_conversation.setdefault(conversation_id, set()).add(message_id)
+
+    def _acquire_lock(self, conversation_id: str) -> bool:
+        client = self._get_redis_client()
+        key = f"lock:run:{self._agent_name}:{conversation_id}"
+        if client is not None:
+            try:
+                # SET NX EX
+                return bool(client.set(key, "1", nx=True, ex=60))
+            except Exception:
+                pass
+        # In-memory fallback
+        if conversation_id in self._locks_in_memory:
+            return False
+        self._locks_in_memory.add(conversation_id)
+        return True
+
+    def _release_lock(self, conversation_id: str) -> None:
+        client = self._get_redis_client()
+        key = f"lock:run:{self._agent_name}:{conversation_id}"
+        if client is not None:
+            try:
+                client.delete(key)
+            except Exception:
+                pass
+        else:
+            self._locks_in_memory.discard(conversation_id)
+
+    # (removed duplicate redefinition)
