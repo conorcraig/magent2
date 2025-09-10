@@ -31,8 +31,8 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     should see zero available messages for that group (no duplicate processing).
     """
 
-    from magent2.bus.redis_adapter import RedisBus
     from magent2.bus.interface import BusMessage
+    from magent2.bus.redis_adapter import RedisBus
     from magent2.worker.worker import Worker
 
     agent_name = "DevAgent"
