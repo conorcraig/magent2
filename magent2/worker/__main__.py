@@ -10,6 +10,7 @@ from magent2.bus.redis_adapter import RedisBus
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, TokenEvent
 from magent2.observability import get_json_logger
 from magent2.runner.config import load_config
+from magent2.runner.demo_runner import DemoRunner
 from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
 from magent2.worker.worker import Runner, Worker
 
@@ -22,6 +23,18 @@ class EchoRunner(Runner):
 
 def build_runner_from_env() -> Runner:
     cfg = load_config()
+    # Allow explicit DEMO runner override for local demos
+    mode = (os.getenv("AGENT_RUNNER_MODE") or "").strip().lower()
+    if mode == "demo":
+        get_json_logger("magent2").info(
+            "runner selected",
+            extra={
+                "event": "runner_selected",
+                "runner": "Demo",
+                "agent": cfg.agent_name,
+            },
+        )
+        return DemoRunner()
     if cfg.api_key:
         from agents import Agent  # defer import to avoid issues in Echo mode
 
