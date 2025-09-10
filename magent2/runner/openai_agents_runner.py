@@ -39,7 +39,9 @@ class OpenAIAgentsRunner:
         self._max_turns: int | None = int(max_turns) if max_turns is not None else None
         # Session configuration (single approach: SQLiteSession if available)
         # - Path is configurable via AGENT_SESSION_PATH; defaults to ./.sessions/agents.db
-        self._sqlite_path: str = (os.getenv("AGENT_SESSION_PATH") or "./.sessions/agents.db").strip()
+        self._sqlite_path: str = (
+            os.getenv("AGENT_SESSION_PATH") or "./.sessions/agents.db"
+        ).strip()
 
         # Optional persistent sessions (detect availability once)
         self._sqlite_session_cls: Any | None = None

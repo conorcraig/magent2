@@ -129,7 +129,7 @@ curl -N http://localhost:8000/stream/conv1
 just log
 ```
 
-Requires LazyDocker. Install: https://github.com/jesseduffield/lazydocker#installation
+Requires LazyDocker. Install: <https://github.com/jesseduffield/lazydocker#installation>
 
 ### Client CLI (one-shot and streaming)
 
