@@ -1,0 +1,141 @@
+{
+  "url": "https://api.github.com/repos/conorcraig/magent2/issues/68",
+  "repository_url": "https://api.github.com/repos/conorcraig/magent2",
+  "labels_url": "https://api.github.com/repos/conorcraig/magent2/issues/68/labels{/name}",
+  "comments_url": "https://api.github.com/repos/conorcraig/magent2/issues/68/comments",
+  "events_url": "https://api.github.com/repos/conorcraig/magent2/issues/68/events",
+  "html_url": "https://github.com/conorcraig/magent2/issues/68",
+  "id": 3395732400,
+  "node_id": "I_kwDOPrGkDs7KZsOw",
+  "number": 68,
+  "title": "Worker reprocesses old chat messages on restart (Echo→OpenAI): add durable consumption/checkpointing",
+  "user": {
+    "login": "conorcraig",
+    "id": 34938817,
+    "node_id": "MDQ6VXNlcjM0OTM4ODE3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/34938817?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/conorcraig",
+    "html_url": "https://github.com/conorcraig",
+    "followers_url": "https://api.github.com/users/conorcraig/followers",
+    "following_url": "https://api.github.com/users/conorcraig/following{/other_user}",
+    "gists_url": "https://api.github.com/users/conorcraig/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/conorcraig/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/conorcraig/subscriptions",
+    "organizations_url": "https://api.github.com/users/conorcraig/orgs",
+    "repos_url": "https://api.github.com/users/conorcraig/repos",
+    "events_url": "https://api.github.com/users/conorcraig/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/conorcraig/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "labels": [
+    {
+      "id": 9237487966,
+      "node_id": "LA_kwDOPrGkDs8AAAACJpjhXg",
+      "url": "https://api.github.com/repos/conorcraig/magent2/labels/bug",
+      "name": "bug",
+      "color": "d73a4a",
+      "default": true,
+      "description": "Something isn't working"
+    },
+    {
+      "id": 9239774782,
+      "node_id": "LA_kwDOPrGkDs8AAAACJrvGPg",
+      "url": "https://api.github.com/repos/conorcraig/magent2/labels/infra",
+      "name": "infra",
+      "color": "ededed",
+      "default": false,
+      "description": null
+    },
+    {
+      "id": 9248156075,
+      "node_id": "LA_kwDOPrGkDs8AAAACJzupqw",
+      "url": "https://api.github.com/repos/conorcraig/magent2/labels/runtime",
+      "name": "runtime",
+      "color": "ededed",
+      "default": false,
+      "description": null
+    },
+    {
+      "id": 9248156078,
+      "node_id": "LA_kwDOPrGkDs8AAAACJzuprg",
+      "url": "https://api.github.com/repos/conorcraig/magent2/labels/worker",
+      "name": "worker",
+      "color": "ededed",
+      "default": false,
+      "description": null
+    },
+    {
+      "id": 9248156080,
+      "node_id": "LA_kwDOPrGkDs8AAAACJzupsA",
+      "url": "https://api.github.com/repos/conorcraig/magent2/labels/redis",
+      "name": "redis",
+      "color": "ededed",
+      "default": false,
+      "description": null
+    }
+  ],
+  "state": "closed",
+  "locked": false,
+  "assignee": null,
+  "assignees": [
+
+  ],
+  "milestone": null,
+  "comments": 1,
+  "created_at": "2025-09-08T21:02:52Z",
+  "updated_at": "2025-09-10T06:28:37Z",
+  "closed_at": "2025-09-10T06:28:37Z",
+  "author_association": "OWNER",
+  "active_lock_reason": null,
+  "sub_issues_summary": {
+    "total": 0,
+    "completed": 0,
+    "percent_completed": 0
+  },
+  "issue_dependencies_summary": {
+    "blocked_by": 0,
+    "total_blocked_by": 0,
+    "blocking": 0,
+    "total_blocking": 0
+  },
+  "body": "Summary\n- When the worker restarts (e.g., after adding OPENAI_API_KEY), previously read messages in Redis Streams are reprocessed, producing new LLM outputs for old messages.\n- Observed sequence: Echo mode responded by echoing prompts. After restart with key, OpenAI runner produced new responses for prior messages in the same conversations.\n\nImpact\n- At-least-once delivery without idempotency → duplicate runs/responses after restarts/deploys.\n- Confusing UX: client suddenly shows model responses to earlier prompts.\n- Potential side-effects if tools perform writes (e.g., duplicate todo creations) upon replay.\n\nRoot cause analysis\n- Worker uses Redis Streams without a durable consumption strategy.\n- Current approach keeps an in-memory last_inbound_id (per process) and reads with XRANGE; on restart the checkpoint is lost.\n- No XREADGROUP/XACK / consumer group is used; no persisted cursor per agent; no idempotency keys.\n\nEvidence\n- chat:DevAgent contains prior messages (expected).\n- stream:{conversation_id} shows Echo-mode events first, then new OpenAI events after restart.\n- Worker logs show fresh run_started/run_completed pairs after restart for older messages.\n- Files: `magent2/worker/worker.py` (tail/read loop), `magent2/bus/redis_adapter.py` (XRANGE/XREADGROUP), `magent2/gateway/app.py` (stream SSE fanout), docker restart behavior.\n\nCurrent behavior\n- On startup, worker tails from last_id=None and processes any messages appended before it started; on restart, last_id resets → previously seen messages are seen again and reprocessed.\n\nExpected behavior\n- Exactly-once or at-most-once semantics across restarts for each agent/consumer.\n- No duplicate reprocessing of messages already handled by the previous worker instance.\n\nProposed solutions (choose one or combine)\n1) Redis consumer groups (preferred)\n   - Use XREADGROUP with a per-agent consumer group (e.g., group=agent:{name}).\n   - Acknowledge after successful run (`XACK`) so processed entries are not delivered again.\n   - Handle pending entries on crash/restart by claiming or trimming appropriately.\n   - Pros: Durable offset, scalable consumers, built-in pending handling.\n   - Cons: Requires group creation/management; migration from XRANGE.\n2) Durable last-id checkpoint\n   - Persist last processed stream entry id per agent to Redis (or another store).\n   - On startup, read from checkpoint and XRANGE strictly after that id.\n   - Pros: Simple; minimal change footprint.\n   - Cons: At-least-once unless combined with idempotency; risk of drift if multiple workers.\n3) Idempotency guard (complementary)\n   - Store processed message ids per conversation with TTL; skip duplicates.\n   - Use envelope `id` as idempotency key.\n   - Pros: Defense-in-depth; works with consumer groups or checkpoints.\n   - Cons: Requires storage and eviction policy.\n\nMigration plan\n- Phase 1: Introduce consumer group read path behind feature flag (e.g., WORKER_READ_MODE=group|tail).\n- Phase 2: Backfill group and start ACKing post-success; add metrics for pending/claimed.\n- Phase 3: Remove legacy XRANGE tailing once stable.\n- Optional: Add idempotency key cache to avoid duplicates across edge cases.\n\nAcceptance criteria\n- Restarting the worker does not generate duplicate outputs for previously processed messages.\n- Pending handling verified: crashed mid-run messages are either retried once or parked, per policy.\n- Metrics/logs expose counts of pending, claimed, processed, and acked entries.\n- Tests cover XRANGE→XREADGROUP path (unit + docker e2e).\n\nTest plan\n- Unit: mock RedisBus to simulate messages and verify no reprocessing after restart.\n- Integration: docker-compose e2e test that posts N messages, processes them, restarts worker, confirms zero duplicate outputs.\n- Crash simulation: send message, kill worker mid-run, ensure single retry/claim then ACK.\n\nObservability\n- Extend existing JSON logs to include stream entry id, group, consumer id, and run_id.\n- Counters: runs_started, runs_completed, runs_retried, redis_pending_claimed, redis_acked.\n\nBackward compatibility & config\n- Default to current behavior if READ_MODE not set.\n- Provide envs: `WORKER_READ_MODE`, `WORKER_GROUP_NAME`, `WORKER_CONSUMER_NAME` (auto default); `WORKER_POLL_MS`.\n\nRisks\n- Misconfigured groups can stall delivery; ensure group creation at startup and safe fallbacks.\n- Potential double-processing during migration; mitigate with idempotency guard.\n\nOwner / Areas\n- Area: worker, bus/redis, e2e tests.\n- Proposed owner: runtime/infra.\n\nReferences\n- Files: `magent2/worker/worker.py`, `magent2/bus/redis_adapter.py`, `magent2/gateway/app.py`.\n- Related behavior discussed in recent session (Echo→OpenAI switch caused reprocessing).",
+  "closed_by": {
+    "login": "conorcraig",
+    "id": 34938817,
+    "node_id": "MDQ6VXNlcjM0OTM4ODE3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/34938817?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/conorcraig",
+    "html_url": "https://github.com/conorcraig",
+    "followers_url": "https://api.github.com/users/conorcraig/followers",
+    "following_url": "https://api.github.com/users/conorcraig/following{/other_user}",
+    "gists_url": "https://api.github.com/users/conorcraig/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/conorcraig/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/conorcraig/subscriptions",
+    "organizations_url": "https://api.github.com/users/conorcraig/orgs",
+    "repos_url": "https://api.github.com/users/conorcraig/repos",
+    "events_url": "https://api.github.com/users/conorcraig/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/conorcraig/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "reactions": {
+    "url": "https://api.github.com/repos/conorcraig/magent2/issues/68/reactions",
+    "total_count": 0,
+    "+1": 0,
+    "-1": 0,
+    "laugh": 0,
+    "hooray": 0,
+    "confused": 0,
+    "heart": 0,
+    "rocket": 0,
+    "eyes": 0
+  },
+  "timeline_url": "https://api.github.com/repos/conorcraig/magent2/issues/68/timeline",
+  "performed_via_github_app": null,
+  "state_reason": "completed"
+}
