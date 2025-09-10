@@ -64,4 +64,3 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     worker2 = Worker(agent_name=agent_name, bus=bus2, runner=runner)
     processed2 = worker2.process_available(limit=10)
     assert processed2 == 0
-
