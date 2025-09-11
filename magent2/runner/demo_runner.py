@@ -3,16 +3,25 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEvent, ToolStepEvent
+from magent2.models.envelope import (
+    BaseStreamEvent,
+    MessageEnvelope,
+    OutputEvent,
+    ToolStepEvent,
+)
 from magent2.tools.terminal.function_tools import terminal_run
 
 
 class DemoRunner:
     """Deterministic runner for local demos without external API calls.
 
-    Protocol: if the message content starts with "run:" the remainder is treated
-    as a shell command and executed via the local TerminalTool policy.
-    A tool_step event is emitted before/after the execution, followed by a final output.
+    Protocol:
+    - If the message content starts with "run:", the remainder is treated as a
+      shell command and executed via the local TerminalTool policy. Tool-step
+      events are emitted, followed by a conversational final message summarizing
+      the result.
+    - Otherwise, return a short conversational acknowledgement to simulate
+      back-and-forth.
     """
 
     def stream_run(self, envelope: MessageEnvelope) -> Iterable[BaseStreamEvent | dict[str, Any]]:
@@ -34,11 +43,22 @@ class DemoRunner:
                 args={},
                 result_summary=(result[:200] if isinstance(result, str) else str(result)[:200]),
             )
-            # Final answer includes the concise result string
-            yield OutputEvent(conversation_id=envelope.conversation_id, text=result)
+            # Conversational final answer that includes the concise result string
+            result_str = result if isinstance(result, str) else str(result)
+            final_text = (
+                "I ran: "
+                + cmd
+                + "\n\nHere is the result:\n"
+                + result_str
+            )
+            yield OutputEvent(conversation_id=envelope.conversation_id, text=final_text)
             return
-        # Default: echo the content
-        yield OutputEvent(conversation_id=envelope.conversation_id, text=text)
+        # Default: short acknowledgement for a natural-feeling exchange
+        ack = text if text else "(no content)"
+        yield OutputEvent(
+            conversation_id=envelope.conversation_id,
+            text=f"Got it — {ack}",
+        )
 
 
 __all__ = ["DemoRunner"]
