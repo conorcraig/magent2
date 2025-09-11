@@ -50,7 +50,12 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     )
 
     # First worker with consumer "c1": should process exactly one message
-    bus1 = RedisBus(redis_url=redis_url, group_name=group, consumer_name="c1")
+    bus1 = RedisBus(
+        redis_url=redis_url,
+        group_name=group,
+        consumer_name="c1",
+        block_ms=200,
+    )
     runner = _SimpleRunner(outputs_by_conversation={conversation_id: "done"})
     worker1 = Worker(agent_name=agent_name, bus=bus1, runner=runner)
 
@@ -64,7 +69,12 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     assert processed1 == 1
 
     # Second worker with a different consumer in the same group: should find no new messages
-    bus2 = RedisBus(redis_url=redis_url, group_name=group, consumer_name="c2")
+    bus2 = RedisBus(
+        redis_url=redis_url,
+        group_name=group,
+        consumer_name="c2",
+        block_ms=200,
+    )
     worker2 = Worker(agent_name=agent_name, bus=bus2, runner=runner)
     processed2 = worker2.process_available(limit=10)
     assert processed2 == 0
