@@ -54,7 +54,11 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     runner = _SimpleRunner(outputs_by_conversation={conversation_id: "done"})
     worker1 = Worker(agent_name=agent_name, bus=bus1, runner=runner)
 
-    bus1.publish(inbound_topic, BusMessage(topic=inbound_topic, payload=env.model_dump()))
+    # Serialize envelope using JSON mode to ensure datetime fields are serializable
+    bus1.publish(
+        inbound_topic,
+        BusMessage(topic=inbound_topic, payload=env.model_dump(mode="json")),
+    )
 
     processed1 = worker1.process_available(limit=10)
     assert processed1 == 1
