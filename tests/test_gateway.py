@@ -167,3 +167,39 @@ async def test_gateway_stream_relays_sse_events() -> None:
     assert seen[0]["text"] == "Hi"
     assert seen[1]["event"] == "output"
     assert seen[1]["text"] == "Done"
+
+
+@pytest.mark.asyncio
+async def test_gateway_send_emits_user_message_event_to_stream() -> None:
+    from magent2.gateway.app import create_app
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    conversation_id = "conv_stream_user"
+    stream_topic = f"stream:{conversation_id}"
+
+    env = MessageEnvelope(
+        conversation_id=conversation_id,
+        sender="user:alice",
+        recipient="agent:DevAgent",
+        type="message",
+        content="hi there",
+    )
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post("/send", json=env.model_dump(mode="json"))
+        assert resp.status_code == 200
+
+    # Validate that a user_message event was published to the stream topic
+    published = bus._topics.get(stream_topic, [])
+    assert len(published) == 1
+    payload = published[0].payload
+    assert payload.get("event") == "user_message"
+    assert payload.get("conversation_id") == conversation_id
+    assert payload.get("sender") == "user:alice"
+    assert payload.get("text") == "hi there"
+    # created_at should be an ISO8601/RFC3339 string
+    assert isinstance(payload.get("created_at"), str)
