@@ -1,0 +1,5 @@
+INFO:     Started server process [18985]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+{"ts": "2025-09-11T07:35:07.865324+00:00", "level": "info", "logger": "magent2", "message": "runner selected", "metadata": {"tools": "tool,tool,tool,tool,tool,tool,tool"}, "event": "runner_selected", "agent": "DevAgent"}
