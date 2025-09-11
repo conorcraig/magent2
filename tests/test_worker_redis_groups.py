@@ -35,7 +35,7 @@ def test_worker_no_duplicate_after_restart_with_consumer_group(redis_url: str) -
     from magent2.bus.redis_adapter import RedisBus
     from magent2.worker.worker import Worker
 
-    agent_name = "DevAgent"
+    agent_name = f"Agent{uuid.uuid4().hex[:8]}"
     inbound_topic = f"chat:{agent_name}"
     conversation_id = f"conv-{uuid.uuid4().hex[:8]}"
     group = f"g-{uuid.uuid4()}"
