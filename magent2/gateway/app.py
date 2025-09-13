@@ -30,61 +30,75 @@ def _sse_cap_bytes() -> int | None:
 
 
 def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) -> dict[str, Any]:
-    """Ensure a JSON-serializable payload fits within cap_bytes when encoded.
-
-    Strategy:
-    - If no cap or already under cap, return as-is
-    - If "text" field exists, truncate it to fit and mark truncated=true
-    - Fallback to a minimal event with truncated=true if still over
-    """
+    """Ensure a JSON-serializable payload fits within cap_bytes when encoded."""
     if cap_bytes is None:
         return payload
+
+    # Check if payload already fits
     try:
         s = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if len(s) <= cap_bytes:
             return payload
     except Exception:
-        # Fail-safe: replace with minimal truncated marker
-        return {
-            "event": str(payload.get("event", "output")),
-            "truncated": True,
-            "cap_bytes": cap_bytes,
-        }
+        return _create_minimal_truncated_payload(payload, cap_bytes)
 
-    # Attempt to truncate text field if present
-    result = dict(payload)
-    if isinstance(result.get("text"), str):
-        original_text: str = result["text"]
+    # Try to truncate text field if present
+    if isinstance(payload.get("text"), str):
+        truncated = _truncate_text_field(payload, cap_bytes)
+        if truncated:
+            return truncated
+
+    # Fallback to minimal payload
+    return _create_minimal_truncated_payload(payload, cap_bytes)
+
+
+def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any] | None:
+    """Try to truncate the text field to fit within cap_bytes."""
+    try:
+        result = dict(payload)
+        original_text = result["text"]
+
         # Compute overhead without text content
         base = dict(result)
         base["text"] = ""
         base["truncated"] = True
         base["cap_bytes"] = cap_bytes
-        try:
-            overhead = len(json.dumps(base, separators=(",", ":")).encode("utf-8"))
-        except Exception:
-            overhead = 0
+
+        overhead = len(json.dumps(base, separators=(",", ":")).encode("utf-8"))
         allowed_text_bytes = max(0, cap_bytes - overhead)
+
         text_bytes = original_text.encode("utf-8")
         trimmed = text_bytes[:allowed_text_bytes].decode("utf-8", errors="ignore")
         base["text"] = trimmed
-        try:
-            if len(json.dumps(base, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
-                return base
-        except Exception:
-            pass
 
-    # Fallback minimal payload under cap
-    minimal = {
-        "event": str(payload.get("event", "output")),
-        "truncated": True,
-        "cap_bytes": cap_bytes,
-    }
+        if len(json.dumps(base, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
+            return base
+    except Exception:
+        pass
+    return None
+
+
+def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any]:
+    """Create a minimal truncated payload that fits within cap_bytes."""
     try:
-        if len(json.dumps(minimal, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
+        # Safe way to get event type
+        event_type = "output"
+        if isinstance(payload, dict) and "event" in payload:
+            event_type = str(payload["event"])
+
+        minimal = {
+            "event": event_type,
+            "truncated": True,
+            "cap_bytes": cap_bytes,
+        }
+
+        # Verify it fits
+        minimal_json = json.dumps(minimal, separators=(",", ":")).encode("utf-8")
+        if len(minimal_json) <= cap_bytes:
             return minimal
     except Exception:
         pass
+
     return {"event": "truncated"}
 
 
