@@ -74,7 +74,38 @@ rebuild:
 # ──────────────────────────────────────────────────────────────────────────────
 # Dev UX: Logs
 # ──────────────────────────────────────────────────────────────────────────────
+log-raw:
+	# Stage 1: Raw Docker logs (no filtering)
+	docker compose logs -f --no-log-prefix gateway worker
+
 log:
+    #!/usr/bin/env bash
+    # Stage 4: Final human-readable output (filtered)
+    if ! command -v jq >/dev/null 2>&1; then
+      printf "\033[1;31mjq is not installed.\033[0m\n";
+      printf "Install: https://jqlang.github.io/jq/download/\n";
+      exit 127;
+    fi
+    if ! command -v humanlog >/dev/null 2>&1; then
+      printf "\033[1;31mhumanlog is not installed.\033[0m\n";
+      printf "Install: https://humanlog.io/docs/integrations/structured-logging\n";
+      printf "Alternative: pipe via jq ->  docker compose logs -f --no-log-prefix | jq -C .\n";
+      exit 127;
+    fi
+    docker compose logs -f --no-log-prefix gateway worker \
+      | jq --unbuffered -Rc '
+        . as $raw
+        | (try fromjson catch $raw) as $j
+        | if ($j|type)=="object" then $j else {msg:($j|tostring), level:"text"} end
+        | .service = (.service // env.SERVICE_NAME // "unknown")
+        | .msg = (.msg // .message // .log // .event // .err // "" | tostring)
+        | select((.msg // "" | test("GET /health")) | not)
+        | .msg = (if .service then ("[" + .service + "] " + .msg) else .msg end)
+        | if has("service") then del(.service) else . end
+      ' \
+      | humanlog --time-format "15:04:05"
+
+lazydocker:
 	# Open LazyDocker for an interactive logs view across services
 	@if command -v lazydocker >/dev/null 2>&1; then \
 	  printf "\033[1;36m==> Launching LazyDocker\033[0m\n"; \
@@ -86,17 +117,6 @@ log:
 	  exit 127; \
 	fi
 
-logs-pretty:
-	# Pretty/color stream of all service logs using humanlog
-	@if command -v humanlog >/dev/null 2>&1; then \
-	  printf "\033[1;36m==> Streaming logs via humanlog\033[0m\n"; \
-	  docker compose logs -f --no-log-prefix | humanlog; \
-	else \
-	  printf "\033[1;31mhumanlog is not installed.\033[0m\n"; \
-	  printf "Install: https://humanlog.io/docs/integrations/structured-logging\n"; \
-	  printf "Alternative: pipe via jq ->  docker compose logs -f --no-log-prefix | jq -C .\n"; \
-	  exit 127; \
-	fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Local (no Docker): gateway + worker in one process
@@ -120,13 +140,13 @@ redis:
 
 gateway:
 	# Run FastAPI gateway bound to 0.0.0.0:8000
-	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
+	SERVICE_NAME=gateway REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
 	uv run uvicorn magent2.gateway.asgi:app --host 0.0.0.0 --port 8000 \
 	  --log-level info --no-access-log
 
 worker:
 	# Run the worker loop (EchoRunner if no OPENAI_API_KEY)
-	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
+	SERVICE_NAME=worker REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} \
 	uv run python -m magent2.worker
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -150,11 +170,11 @@ stack-up:
 	# Wait for Redis ping
 	for i in $(seq 1 100); do if command -v redis-cli >/dev/null 2>&1 && redis-cli -p 6379 ping >/dev/null 2>&1; then break; else sleep 0.05; fi; done
 	# Start Gateway
-	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} nohup ./.venv/bin/python -m uvicorn magent2.gateway.asgi:app --host 0.0.0.0 --port 8000 --log-level warning --no-access-log >/tmp/gateway.log 2>&1 & echo $! > .devstack/gateway.pid
+	SERVICE_NAME=gateway REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} nohup ./.venv/bin/python -m uvicorn magent2.gateway.asgi:app --host 0.0.0.0 --port 8000 --log-level info --no-access-log >/tmp/gateway.log 2>&1 & echo $! > .devstack/gateway.pid
 	# Wait for Gateway /health
 	for i in $(seq 1 200); do if curl -sfS http://localhost:8000/health >/dev/null 2>&1; then break; else sleep 0.05; fi; done
 	# Start Worker (no consumer groups for local convenience)
-	REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} WORKER_USE_GROUPS=${WORKER_USE_GROUPS:-0} AGENT_NAME=${AGENT_NAME:-DevAgent} nohup ./.venv/bin/python -m magent2.worker >/tmp/worker.log 2>&1 & echo $! > .devstack/worker.pid
+	SERVICE_NAME=worker REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} WORKER_USE_GROUPS=${WORKER_USE_GROUPS:-0} AGENT_NAME=${AGENT_NAME:-DevAgent} nohup ./.venv/bin/python -m magent2.worker >/tmp/worker.log 2>&1 & echo $! > .devstack/worker.pid
 	printf "Stack is up (Redis:6379, Gateway:8000, Worker).\n"
 
 stack-down:

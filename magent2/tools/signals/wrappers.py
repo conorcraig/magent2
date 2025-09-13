@@ -22,7 +22,7 @@ def signal_send(topic: str, payload: dict[str, Any] | None = None) -> dict[str, 
         extra={
             "event": "tool_call",
             "tool": "signals.send",
-            "metadata": {"topic": topic},
+            "attributes": {"topic": topic},
         },
     )
     metrics.increment(
@@ -36,7 +36,7 @@ def signal_send(topic: str, payload: dict[str, Any] | None = None) -> dict[str, 
             extra={
                 "event": "tool_error",
                 "tool": "signals.send",
-                "metadata": {"error": str(exc)[:200]},
+                "attributes": {"error": str(exc)[:200]},
             },
         )
         metrics.increment(
@@ -56,7 +56,7 @@ def signal_wait(topic: str, last_id: str | None = None, timeout_ms: int = 30000)
         extra={
             "event": "tool_call",
             "tool": "signals.wait",
-            "metadata": {"topic": topic, "timeout_ms": timeout_ms},
+            "attributes": {"topic": topic, "timeout_ms": timeout_ms},
         },
     )
     metrics.increment(
@@ -70,7 +70,7 @@ def signal_wait(topic: str, last_id: str | None = None, timeout_ms: int = 30000)
             extra={
                 "event": "tool_error",
                 "tool": "signals.wait",
-                "metadata": {"error": str(exc)[:200]},
+                "attributes": {"error": str(exc)[:200]},
             },
         )
         metrics.increment(
