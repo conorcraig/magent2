@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -12,6 +13,93 @@ from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
 from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
+
+
+# ----------------------------
+# SSE utilities
+# ----------------------------
+def _sse_cap_bytes() -> int | None:
+    raw = os.getenv("GATEWAY_SSE_MAX_BYTES", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
+def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) -> dict[str, Any]:
+    """Ensure a JSON-serializable payload fits within cap_bytes when encoded."""
+    if cap_bytes is None:
+        return payload
+
+    # Check if payload already fits
+    try:
+        s = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if len(s) <= cap_bytes:
+            return payload
+    except Exception:
+        return _create_minimal_truncated_payload(payload, cap_bytes)
+
+    # Try to truncate text field if present
+    if isinstance(payload.get("text"), str):
+        truncated = _truncate_text_field(payload, cap_bytes)
+        if truncated:
+            return truncated
+
+    # Fallback to minimal payload
+    return _create_minimal_truncated_payload(payload, cap_bytes)
+
+
+def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any] | None:
+    """Try to truncate the text field to fit within cap_bytes."""
+    try:
+        result = dict(payload)
+        original_text = result["text"]
+
+        # Compute overhead without text content
+        base = dict(result)
+        base["text"] = ""
+        base["truncated"] = True
+        base["cap_bytes"] = cap_bytes
+
+        overhead = len(json.dumps(base, separators=(",", ":")).encode("utf-8"))
+        allowed_text_bytes = max(0, cap_bytes - overhead)
+
+        text_bytes = original_text.encode("utf-8")
+        trimmed = text_bytes[:allowed_text_bytes].decode("utf-8", errors="ignore")
+        base["text"] = trimmed
+
+        if len(json.dumps(base, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
+            return base
+    except Exception:
+        pass
+    return None
+
+
+def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any]:
+    """Create a minimal truncated payload that fits within cap_bytes."""
+    try:
+        # Safe way to get event type
+        event_type = "output"
+        if isinstance(payload, dict) and "event" in payload:
+            event_type = str(payload["event"])
+
+        minimal = {
+            "event": event_type,
+            "truncated": True,
+            "cap_bytes": cap_bytes,
+        }
+
+        # Verify it fits
+        minimal_json = json.dumps(minimal, separators=(",", ":")).encode("utf-8")
+        if len(minimal_json) <= cap_bytes:
+            return minimal
+    except Exception:
+        pass
+
+    return {"event": "truncated"}
 
 
 class SendRequest(BaseModel):
@@ -130,6 +218,15 @@ def create_app(bus: Bus) -> FastAPI:
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
+            cap = _sse_cap_bytes()
+            # Detect if the underlying bus supports blocking reads (e.g., Redis consumer groups)
+            try:
+                blocking_supported = (
+                    bool(getattr(bus, "_group", None))
+                    and int(getattr(bus, "_block_ms", 0) or 0) > 0
+                )
+            except Exception:
+                blocking_supported = False
             # Simple polling loop over Bus.read
             while True:
                 items = await asyncio.to_thread(
@@ -138,7 +235,8 @@ def create_app(bus: Bus) -> FastAPI:
                 if items:
                     for m in items:
                         payload = m.payload
-                        data = json.dumps(payload)
+                        safe_payload = _truncate_payload_for_sse(payload, cap)
+                        data = json.dumps(safe_payload, separators=(",", ":"))
                         yield f"data: {data}\n\n"
                         last_id = m.id
                         sent += 1
@@ -146,7 +244,8 @@ def create_app(bus: Bus) -> FastAPI:
                             return
                 else:
                     # avoid tight loop when no new items are available
-                    await asyncio.sleep(0.02)
+                    if not blocking_supported:
+                        await asyncio.sleep(0.02)
 
         logger.info(
             "gateway stream start",
