@@ -29,6 +29,15 @@ class InMemoryBus(Bus):
                 break
         return list(items[start : start + limit])
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        return self.read(topic, last_id=last_id, limit=limit)
+
 
 @pytest.fixture()
 def bus() -> InMemoryBus:
