@@ -3,10 +3,14 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from magent2.tools.chat.function_tools import send_message
-from magent2.tools.signals.wrappers import signal_wait_all
+
+if TYPE_CHECKING:
+    # Only for typing; avoid importing function-tool wrappers at runtime to prevent
+    # SDK schema validation side-effects during test collection
+    pass
 
 
 def _resolve_target_agent(target_agent: str | None) -> str:
@@ -77,7 +81,11 @@ def orchestrate_split(
 
     if wait and topics:
         # Best-effort wait for children to emit their done signals
-        signal_wait_all_fn = cast(Callable[..., Any], signal_wait_all)
+        from magent2.tools.signals.wrappers import (
+            signal_wait_all as _signal_wait_all,
+        )  # runtime import
+
+        signal_wait_all_fn = cast(Callable[..., Any], _signal_wait_all)
         summary = _maybe_wait(signal_wait_all_fn, topics, timeout_ms)
         return {"ok": True, "children": conv_ids, "topics": topics, "wait": summary}
 
