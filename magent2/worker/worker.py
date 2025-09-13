@@ -114,8 +114,8 @@ class Worker:
             errored = False
             # Track tool call/error counters for this run (best-effort via Metrics snapshot)
             snap_before = metrics.snapshot()
-            tool_calls_before = len([e for e in snap_before if e.get("name") == "tool_calls"])  # type: ignore[union-attr]
-            tool_errors_before = len([e for e in snap_before if e.get("name") == "tool_errors"])  # type: ignore[union-attr]
+            tool_calls_before = len([e for e in snap_before if e.get("name") == "tool_calls"]) 
+            tool_errors_before = len([e for e in snap_before if e.get("name") == "tool_errors"]) 
             try:
                 for event in self._runner.stream_run(envelope):
                     if isinstance(event, BaseStreamEvent):
@@ -151,10 +151,10 @@ class Worker:
                     snap_after = metrics.snapshot()
                     tool_calls_after = len(
                         [e for e in snap_after if e.get("name") == "tool_calls"]
-                    )  # type: ignore[union-attr]
+                    )
                     tool_errors_after = len(
                         [e for e in snap_after if e.get("name") == "tool_errors"]
-                    )  # type: ignore[union-attr]
+                    )
                     run_tool_calls = max(0, tool_calls_after - tool_calls_before)
                     run_tool_errors = max(0, tool_errors_after - tool_errors_before)
                     logger.info(

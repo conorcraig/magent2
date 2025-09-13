@@ -172,7 +172,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         cwd_effective: str | None = None
         try:
             # Resolve effective cwd if sandboxing applies (best effort)
-            cwd_effective = getattr(tool, "_resolve_working_dir")(cwd)  # type: ignore[misc]
+            cwd_effective = tool._resolve_working_dir(cwd)
         except Exception:
             cwd_effective = None
         try:
