@@ -1,2 +1,0 @@
-Run a short terminal command to demonstrate tools.
-Use terminal_run_tool to run: echo hello.
