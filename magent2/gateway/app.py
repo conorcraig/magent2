@@ -189,9 +189,10 @@ def create_app(bus: Bus) -> FastAPI:
             cap = _sse_cap_bytes()
             # Detect if the underlying bus supports blocking reads (e.g., Redis consumer groups)
             try:
-                blocking_supported = bool(getattr(bus, "_group", None)) and int(
-                    getattr(bus, "_block_ms", 0) or 0
-                ) > 0
+                blocking_supported = (
+                    bool(getattr(bus, "_group", None))
+                    and int(getattr(bus, "_block_ms", 0) or 0) > 0
+                )
             except Exception:
                 blocking_supported = False
             # Simple polling loop over Bus.read
