@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import time
 import traceback
@@ -109,6 +110,8 @@ class Worker:
                 event_count, token_count, tool_steps, output_chars = self._stream_events(
                     envelope, stream_topic
                 )
+                # Optional child auto-complete behavior after streaming completes
+                self._maybe_emit_done_signal(envelope)
             except Exception:
                 errored = True
                 duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
@@ -175,6 +178,28 @@ class Worker:
                 if isinstance(text_val, str):
                     output_chars += len(text_val)
         return event_count, token_count, tool_steps, output_chars
+
+    def _maybe_emit_done_signal(self, envelope: MessageEnvelope) -> None:
+        """Emit a done signal when opt-in gate is enabled and metadata hints exist."""
+        try:
+            auto_gate = os.getenv("AUTO_CHILD_SIGNAL_DONE", "0").strip() == "1"
+            if not auto_gate:
+                return
+
+            meta = envelope.metadata or {}
+            orchestrate_block = meta.get("orchestrate") if isinstance(meta, dict) else None
+            topic = (
+                orchestrate_block.get("done_topic") if isinstance(orchestrate_block, dict) else None
+            )
+            if isinstance(topic, str):
+                topic = topic.strip()
+            if isinstance(topic, str) and topic.startswith("signal:") and len(topic) <= 256:
+                from magent2.tools.signals.impl import send_signal
+
+                send_signal(topic, {"ok": True})
+        except Exception:
+            # Best-effort; suppress to avoid impacting the main run
+            pass
 
     def _log_run_started(self, logger: Any, run_id: str, envelope: MessageEnvelope) -> None:
         logger.info(
@@ -393,7 +418,7 @@ class Worker:
                 # Ensure TTL exists (set if not present)
                 try:
                     ttl = int(client.ttl(key))
-                except Exception:
+                except (TypeError, ValueError):
                     ttl = -2
                 if ttl is None or ttl < 0:
                     client.expire(key, 60 * 60 * 24)
@@ -415,7 +440,7 @@ class Worker:
                 client.sadd(key, message_id)
                 try:
                     ttl = int(client.ttl(key))
-                except Exception:
+                except (TypeError, ValueError):
                     ttl = -2
                 if ttl is None or ttl < 0:
                     client.expire(key, 60 * 60 * 24)

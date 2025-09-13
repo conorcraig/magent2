@@ -61,6 +61,7 @@ def signal_send(topic: str, payload: dict[str, Any] | None = None) -> dict[str, 
                 "run_id": str(ctx.get("run_id", "")),
             },
         )
+        # Re-raise so callers can handle explicit failures
         raise
 
 
