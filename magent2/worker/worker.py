@@ -109,19 +109,43 @@ class Worker:
                 # if message carries a done_topic hint and the env gate is enabled,
                 # emit a done signal.
                 try:
-                    content = envelope.content or ""
                     auto_gate = os.getenv("AUTO_CHILD_SIGNAL_DONE", "0").strip() == "1"
-                    if "done_topic=" in content and auto_gate:
-                        # Parse naive "done_topic=..." from content
-                        try:
-                            frag = content.split("done_topic=", 1)[1]
-                            topic = frag.split("]", 1)[0].strip()
-                        except Exception:
-                            topic = ""
-                        if topic:
-                            from magent2.tools.signals.impl import send_signal
+                    topic = ""
 
-                            send_signal(topic, {"ok": True})
+                    # Prefer structured metadata set by orchestrate.py
+                    try:
+                        meta = envelope.metadata or {}
+                        if isinstance(meta, dict):
+                            orch = meta.get("orchestrate")
+                            if isinstance(orch, dict):
+                                val = orch.get("done_topic")
+                                if isinstance(val, str):
+                                    topic = val.strip()
+                            # Also support root-level done_topic if present
+                            if not topic:
+                                root_val = meta.get("done_topic")
+                                if isinstance(root_val, str):
+                                    topic = root_val.strip()
+                    except Exception:
+                        topic = ""
+
+                    # Fallback to legacy content parsing for backward compatibility
+                    if not topic:
+                        content = envelope.content or ""
+                        if "done_topic=" in content:
+                            try:
+                                frag = content.split("done_topic=", 1)[1]
+                                if "]" in frag:
+                                    topic = frag.split("]", 1)[0].strip()
+                                else:
+                                    topic = frag.split()[0].strip()
+                            except Exception:
+                                topic = ""
+
+                    if auto_gate and topic:
+                        from magent2.tools.signals.impl import send_signal
+
+                        send_signal(topic, {"ok": True})
                 except Exception:
                     pass
             except Exception:
