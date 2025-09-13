@@ -76,6 +76,32 @@ def test_redaction_via_env_and_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
     assert redact_substring_value not in out
 
 
+def test_redaction_jwt_and_bearer_in_function_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    _setenv(monkeypatch, TERMINAL_ALLOWED_COMMANDS="bash")
+    # Low-entropy placeholder JWT-like and Bearer strings
+    jwt = (
+        "AAAAAAAAaaaaaaaa0000----____."  # header
+        "BBBBBBBBbbbbbbbb1111----____."  # payload
+        "CCCCCCCCcccccccc2222----____"  # signature
+    )
+    bearer = "Bearer AAAAAAAA.bbbbbbbb-0000____"  # pragma: allowlist secret
+    out = terminal_run(f"bash -lc 'echo {jwt}; echo {bearer}'")
+    assert "[REDACTED]" in out
+    assert jwt not in out
+    assert bearer not in out
+
+
+def test_high_entropy_token_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    _setenv(monkeypatch, TERMINAL_ALLOWED_COMMANDS="bash")
+    high_entropy = (  # pragma: allowlist secret
+        "A1b2C3d4E5f6G7h8I9j0K1L2M3N4O5P6Q7R8S9T0UVWXyz_+==/"  # pragma: allowlist secret
+        "A1b2C3d4E5f6G7h8I9j0"  # pragma: allowlist secret
+    )
+    out = terminal_run(f"bash -lc 'echo {high_entropy}'")
+    assert "[REDACTED]" in out
+    assert high_entropy not in out
+
+
 def test_returns_failure_string_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     # No allowed commands configured -> PermissionError -> function should return failure string
     monkeypatch.delenv("TERMINAL_ALLOWED_COMMANDS", raising=False)

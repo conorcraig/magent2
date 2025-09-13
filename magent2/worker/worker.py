@@ -79,7 +79,7 @@ class Worker:
 
             try:
                 self._run_and_stream_with_retry(envelope)
-                # Mark processed regardless of success to avoid hot-looping; on failure we DLQ
+                # Only mark processed on success
                 self._mark_processed(envelope.conversation_id, envelope.id)
             finally:
                 self._release_lock(envelope.conversation_id)
@@ -98,39 +98,168 @@ class Worker:
         stream_topic = f"stream:{envelope.conversation_id}"
 
         with use_run_context(run_id, envelope.conversation_id, self._agent_name):
-            self._log_run_started(logger, run_id, envelope.conversation_id)
-            self._inc_runs_started(metrics, envelope.conversation_id)
-
-            # Track tool call/error counters for this run (best-effort via Metrics snapshot)
-            snap_before = metrics.snapshot()
-            tool_calls_before = sum(
-                int(e.get("value", 0)) for e in snap_before if e.get("name") == "tool_calls"
+            start_ns = time.perf_counter_ns()
+            self._log_run_started(logger, run_id, envelope)
+            metrics.increment(
+                "runs_started",
+                {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
             )
-            tool_errors_before = sum(
-                int(e.get("value", 0)) for e in snap_before if e.get("name") == "tool_errors"
-            )
+            errored = False
             try:
-                for event in self._runner.stream_run(envelope):
-                    self._publish_stream_event(stream_topic, event)
-            except Exception:
-                self._log_run_errored(logger, run_id, envelope.conversation_id)
-                self._inc_runs_errored(metrics, envelope.conversation_id)
-                # Re-raise so the retry/DLQ policy can handle terminal failures
-                raise
-            else:
-                calls_after, errs_after = self._compute_tool_counts(metrics)
-                run_tool_calls = max(0, calls_after - tool_calls_before)
-                run_tool_errors = max(0, errs_after - tool_errors_before)
-                self._log_run_completed(
-                    logger, run_id, envelope.conversation_id, run_tool_calls, run_tool_errors
+                event_count, token_count, tool_steps, output_chars = self._stream_events(
+                    envelope, stream_topic
                 )
-                self._inc_runs_completed(metrics, envelope.conversation_id)
+            except Exception:
+                errored = True
+                duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                self._log_run_errored(
+                    logger,
+                    run_id,
+                    envelope,
+                    duration_ms,
+                    event_count=locals().get("event_count", 0),
+                    token_count=locals().get("token_count", 0),
+                    tool_steps=locals().get("tool_steps", 0),
+                    output_chars=locals().get("output_chars", 0),
+                )
+                metrics.increment(
+                    "runs_errored",
+                    {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
+                )
+                raise
+            finally:
+                if not errored:
+                    duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                    self._log_run_completed(
+                        logger,
+                        run_id,
+                        envelope,
+                        duration_ms,
+                        event_count=locals().get("event_count", 0),
+                        token_count=locals().get("token_count", 0),
+                        tool_steps=locals().get("tool_steps", 0),
+                        output_chars=locals().get("output_chars", 0),
+                    )
+                    metrics.increment(
+                        "runs_completed",
+                        {
+                            "agent": self._agent_name,
+                            "conversation_id": envelope.conversation_id,
+                        },
+                    )
+
+    def _stream_events(
+        self, envelope: MessageEnvelope, stream_topic: str
+    ) -> tuple[int, int, int, int]:
+        event_count = 0
+        token_count = 0
+        tool_steps = 0
+        output_chars = 0
+        for event in self._runner.stream_run(envelope):
+            if isinstance(event, BaseStreamEvent):
+                payload: dict[str, Any] = event.model_dump(mode="json")
+            else:
+                payload = event
+            self._bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=payload))
+            event_count += 1
+            kind = str(payload.get("event", ""))
+            if kind == "token":
+                token_count += 1
+                text_val = payload.get("text")
+                if isinstance(text_val, str):
+                    output_chars += len(text_val)
+            elif kind == "tool_step":
+                tool_steps += 1
+            elif kind == "output":
+                text_val = payload.get("text")
+                if isinstance(text_val, str):
+                    output_chars += len(text_val)
+        return event_count, token_count, tool_steps, output_chars
+
+    def _log_run_started(self, logger: Any, run_id: str, envelope: MessageEnvelope) -> None:
+        logger.info(
+            "run started",
+            extra={
+                "event": "run_started",
+                "service": "worker",
+                "run_id": run_id,
+                "conversation_id": envelope.conversation_id,
+                "agent": self._agent_name,
+                "attributes": {"input_len": len(envelope.content or "")},
+            },
+        )
+
+    def _log_run_completed(
+        self,
+        logger: Any,
+        run_id: str,
+        envelope: MessageEnvelope,
+        duration_ms: float,
+        *,
+        event_count: int,
+        token_count: int,
+        tool_steps: int,
+        output_chars: int,
+    ) -> None:
+        logger.info(
+            "run completed",
+            extra={
+                "event": "run_completed",
+                "service": "worker",
+                "run_id": run_id,
+                "conversation_id": envelope.conversation_id,
+                "agent": self._agent_name,
+                "duration_ms": duration_ms,
+                "attributes": {
+                    "events": event_count,
+                    "tokens": token_count,
+                    "tool_steps": tool_steps,
+                    "output_chars": output_chars,
+                },
+            },
+        )
+
+    def _log_run_errored(
+        self,
+        logger: Any,
+        run_id: str,
+        envelope: MessageEnvelope,
+        duration_ms: float,
+        *,
+        event_count: int,
+        token_count: int,
+        tool_steps: int,
+        output_chars: int,
+    ) -> None:
+        logger.exception(
+            "run errored",
+            extra={
+                "event": "run_errored",
+                "service": "worker",
+                "run_id": run_id,
+                "conversation_id": envelope.conversation_id,
+                "agent": self._agent_name,
+                "duration_ms": duration_ms,
+                "attributes": {
+                    "events": event_count,
+                    "tokens": token_count,
+                    "tool_steps": tool_steps,
+                    "output_chars": output_chars,
+                },
+            },
+        )
 
     # --- Enhancements for robustness (Issue #38) ---
     def _run_and_stream_with_retry(self, envelope: MessageEnvelope) -> bool:
-        """Run with bounded retries and jittered backoff. Publish to DLQ on terminal failure.
+        """Run with bounded retries and jittered backoff.
 
-        Returns True on success, False on terminal failure.
+        Policy:
+        - Transient errors: retry; on final attempt -> DLQ and raise (hard fail)
+        - Policy/User-input errors: DLQ and return (soft fail; no retry)
+        - System errors: DLQ and raise immediately (hard fail)
+
+        Returns True on success; returns True on soft-fail (so caller marks handled);
+        raises on hard failures.
         """
         max_attempts = 3
         base_sleep = 0.1
@@ -138,88 +267,89 @@ class Worker:
             try:
                 self._run_and_stream(envelope)
                 return True
-            except Exception:
-                # _run_and_stream already logged and incremented metrics on failure
-                if attempt >= max_attempts:
+            except Exception as exc:
+                # _run_and_stream already logged and incremented basic metrics on failure
+                category = self._classify_exception(exc)
+                metrics = get_metrics()
+                logger = get_json_logger("magent2")
+                if category == "policy" or category == "input":
+                    # Soft fail: publish to DLQ for audit, log, no retry
                     self._publish_to_dlq(envelope)
-                    return False
-                # Jittered exponential backoff
-                sleep_seconds = min(1.0, base_sleep * (2 ** (attempt - 1)))
-                jitter = random.uniform(0.0, 0.05)
-                time.sleep(sleep_seconds + jitter)
+                    metrics.increment(
+                        "runs_soft_failed", {"agent": self._agent_name, "category": category}
+                    )
+                    logger.info(
+                        "run soft-failed",
+                        extra={
+                            "event": "run_soft_failed",
+                            "service": "worker",
+                            "agent": self._agent_name,
+                            "conversation_id": envelope.conversation_id,
+                            "attributes": {"category": category, "error": str(exc)[:200]},
+                        },
+                    )
+                    return True
+                if category == "transient":
+                    if attempt >= max_attempts:
+                        self._publish_to_dlq(envelope)
+                        metrics.increment(
+                            "runs_hard_failed",
+                            {"agent": self._agent_name, "category": category, "phase": "final"},
+                        )
+                        raise RuntimeError("run failed after retries; published to DLQ") from exc
+                    # retry with jittered exponential backoff
+                    metrics.increment(
+                        "runs_retrying",
+                        {"agent": self._agent_name, "attempt": str(attempt), "category": category},
+                    )
+                    sleep_seconds = min(1.0, base_sleep * (2 ** (attempt - 1)))
+                    jitter = random.uniform(0.0, 0.05)
+                    time.sleep(sleep_seconds + jitter)
+                    continue
+                # system or unknown: immediate hard-fail
+                self._publish_to_dlq(envelope)
+                metrics.increment(
+                    "runs_hard_failed",
+                    {"agent": self._agent_name, "category": category, "phase": "immediate"},
+                )
+                raise
 
         # Should not reach here
         return False
 
-    # ----- helpers to reduce complexity in _run_and_stream -----
-    def _publish_stream_event(
-        self, stream_topic: str, event: BaseStreamEvent | dict[str, Any]
-    ) -> None:
-        if isinstance(event, BaseStreamEvent):
-            payload: dict[str, Any] = event.model_dump(mode="json")
-        else:
-            payload = event
-        self._bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=payload))
+    @staticmethod
+    def _classify_exception(exc: Exception) -> str:
+        """Best-effort classification into: transient | policy | input | system.
 
-    def _compute_tool_counts(self, metrics: Any) -> tuple[int, int]:
-        snap = metrics.snapshot()
-        calls = sum(int(e.get("value", 0)) for e in snap if e.get("name") == "tool_calls")
-        errs = sum(int(e.get("value", 0)) for e in snap if e.get("name") == "tool_errors")
-        return calls, errs
-
-    def _log_run_started(self, logger: Any, run_id: str, conversation_id: str) -> None:
-        logger.info(
-            "run started",
-            extra={
-                "event": "run_started",
-                "run_id": run_id,
-                "conversation_id": conversation_id,
-                "agent": self._agent_name,
-            },
-        )
-
-    def _inc_runs_started(self, metrics: Any, conversation_id: str) -> None:
-        metrics.increment(
-            "runs_started",
-            {"agent": self._agent_name, "conversation_id": conversation_id},
-        )
-
-    def _log_run_errored(self, logger: Any, run_id: str, conversation_id: str) -> None:
-        logger.exception(
-            "run errored",
-            extra={
-                "event": "run_errored",
-                "run_id": run_id,
-                "conversation_id": conversation_id,
-                "agent": self._agent_name,
-            },
-        )
-
-    def _inc_runs_errored(self, metrics: Any, conversation_id: str) -> None:
-        metrics.increment(
-            "runs_errored",
-            {"agent": self._agent_name, "conversation_id": conversation_id},
-        )
-
-    def _log_run_completed(
-        self, logger: Any, run_id: str, conversation_id: str, tool_calls: int, tool_errors: int
-    ) -> None:
-        logger.info(
-            "run completed",
-            extra={
-                "event": "run_completed",
-                "run_id": run_id,
-                "conversation_id": conversation_id,
-                "agent": self._agent_name,
-                "kv": {"tool_calls": tool_calls, "tool_errors": tool_errors},
-            },
-        )
-
-    def _inc_runs_completed(self, metrics: Any, conversation_id: str) -> None:
-        metrics.increment(
-            "runs_completed",
-            {"agent": self._agent_name, "conversation_id": conversation_id},
-        )
+        Heuristics only; errs on the side of "system" for unknowns.
+        """
+        msg = str(exc).lower()
+        # Permission and sandbox violations
+        if isinstance(exc, PermissionError):
+            return "policy"
+        # Bad user input or schema validation
+        if isinstance(exc, ValueError) or isinstance(exc, KeyError):
+            return "input"
+        # Timeouts and connection issues
+        if isinstance(exc, TimeoutError):
+            return "transient"
+        # Common connection error phrases
+        if any(
+            w in msg
+            for w in (
+                "connection error",
+                "connection reset",
+                "connection refused",
+                "network is unreachable",
+                "temporarily unavailable",
+            )
+        ):
+            return "transient"
+        # Common transient keywords
+        if any(w in msg for w in ("rate limit", "quota", "timeout", "temporarily unavailable")):
+            return "transient"
+        # Default to system for unexpected/unhandled errors
+        return "system"
 
     def _publish_to_dlq(self, envelope: MessageEnvelope) -> None:
         """Publish the failed envelope to a dead-letter queue topic.
@@ -247,7 +377,8 @@ class Worker:
             from magent2.bus.redis_adapter import RedisBus  # local import to avoid hard dep
 
             if isinstance(self._bus, RedisBus):
-                return self._bus._redis
+                # Use public API to avoid private attribute access
+                return self._bus.get_client()
         except Exception:
             return None
         return None

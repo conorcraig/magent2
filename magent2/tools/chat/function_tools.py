@@ -121,7 +121,7 @@ def send_message(
         extra={
             "event": "tool_call",
             "tool": "chat.send",
-            "metadata": {"recipient": rec},
+            "attributes": {"recipient": rec},
         },
     )
     metrics.increment(
@@ -149,7 +149,7 @@ def send_message(
             extra={
                 "event": "tool_error",
                 "tool": "chat.send",
-                "metadata": {"error": str(exc)[:200]},
+                "attributes": {"error": str(exc)[:200]},
             },
         )
         metrics.increment(

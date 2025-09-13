@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
-from magent2.observability import get_json_logger, get_metrics
+from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
 
 
 class SendRequest(BaseModel):
@@ -25,6 +25,8 @@ class SendRequest(BaseModel):
 
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
+    # Configure uvicorn logging at app startup to avoid import-time side effects
+    configure_uvicorn_logging()
     logger = get_json_logger("magent2.gateway")
     metrics = get_metrics()
 
@@ -98,7 +100,13 @@ def create_app(bus: Bus) -> FastAPI:
             "gateway send",
             extra={
                 "event": "gateway_send",
+                "service": "gateway",
                 "conversation_id": message.conversation_id,
+                "attributes": {
+                    "sender": message.sender,
+                    "recipient": message.recipient,
+                    "content_len": len(message.content or ""),
+                },
             },
         )
         metrics.increment("gateway_sends", {"conversation_id": message.conversation_id})
@@ -106,12 +114,22 @@ def create_app(bus: Bus) -> FastAPI:
 
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+        """Server‑Sent Events stream for a conversation.
+
+        Semantics:
+        - All `token` events are forwarded as they are produced, enabling
+          real‑time incremental rendering in clients.
+        - `output` and `tool_step` events are forwarded as‑is.
+
+        Parameters:
+        - conversation_id: stream topic key (`stream:{conversation_id}`)
+        - max_events: optional testing aid to stop after N events
+        """
         topic = f"stream:{conversation_id}"
 
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
-            first_token_sent = False
             # Simple polling loop over Bus.read
             while True:
                 items = await asyncio.to_thread(
@@ -120,18 +138,6 @@ def create_app(bus: Bus) -> FastAPI:
                 if items:
                     for m in items:
                         payload = m.payload
-                        # Filter: allow only the first token event; pass through others
-                        try:
-                            event_kind = str(payload.get("event", ""))
-                            if event_kind == "token":
-                                if first_token_sent:
-                                    # skip additional token chunks for stability
-                                    last_id = m.id
-                                    continue
-                                first_token_sent = True
-                        except Exception:
-                            # If payload is not dict-like, fall through without filtering
-                            pass
                         data = json.dumps(payload)
                         yield f"data: {data}\n\n"
                         last_id = m.id
@@ -144,7 +150,11 @@ def create_app(bus: Bus) -> FastAPI:
 
         logger.info(
             "gateway stream start",
-            extra={"event": "gateway_stream", "conversation_id": conversation_id},
+            extra={
+                "event": "gateway_stream",
+                "service": "gateway",
+                "conversation_id": conversation_id,
+            },
         )
         metrics.increment("gateway_streams", {"conversation_id": conversation_id})
         return StreamingResponse(event_gen(), media_type="text/event-stream")
@@ -158,7 +168,7 @@ def create_app(bus: Bus) -> FastAPI:
         except Exception as exc:  # pragma: no cover - error path mapping
             logger.error(
                 "gateway not ready",
-                extra={"event": "gateway_error", "path": "ready"},
+                extra={"event": "gateway_error", "service": "gateway", "path": "ready"},
             )
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 

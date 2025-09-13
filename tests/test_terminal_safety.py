@@ -49,3 +49,22 @@ def test_redaction_of_secrets(tmp_path: Path) -> None:
     assert result["ok"] is True
     assert fake_secret not in result["stdout"]
     assert "[REDACTED]" in result["stdout"]
+
+
+def test_redaction_of_jwt_and_bearer(tmp_path: Path) -> None:
+    tool = TerminalTool(allowed_commands=["bash"])
+    # Minimal-looking JWT-like (3 segments), values are placeholders
+    # Low-entropy placeholder JWT-like string (3 segments)
+    jwt = (
+        "AAAAAAAAaaaaaaaa0000----____."  # header
+        "BBBBBBBBbbbbbbbb1111----____."  # payload
+        "CCCCCCCCcccccccc2222----____"  # signature
+    )
+    # Low-entropy placeholder Bearer token
+    bearer = "Bearer AAAAAAAA.bbbbbbbb-0000____"  # pragma: allowlist secret
+    cmd = f"bash -lc 'echo {jwt}; echo {bearer}'"
+    result = tool.run(cmd)
+    assert result["ok"] is True
+    assert "[REDACTED]" in result["stdout"]
+    assert jwt not in result["stdout"]
+    assert bearer not in result["stdout"]

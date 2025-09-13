@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import cast
 
 import redis
 
+from ...observability import get_json_logger
 from .models import Task
 
 
@@ -52,6 +54,8 @@ class RedisTodoStore(TodoStore):
     def __init__(self, *, url: str, key_prefix: str = "todo") -> None:
         self._redis: redis.Redis = redis.Redis.from_url(url)
         self._prefix = key_prefix.rstrip(":")
+        # Lazy setup of module logger following project conventions
+        self._logger: logging.Logger = get_json_logger("magent2.tools.todo")
 
     # key helpers
     def _task_key(self, task_id: str) -> str:
@@ -81,6 +85,14 @@ class RedisTodoStore(TodoStore):
             data = json.loads(raw.decode("utf-8"))
             return Task.model_validate(data)
         except Exception:
+            # Log a warning when stored JSON is invalid/corrupt to aid diagnostics
+            self._logger.warning(
+                "invalid todo task JSON; returning None",
+                extra={
+                    "event": "todo_task_json_invalid",
+                    "metadata": {"task_id": task_id, "key": self._task_key(task_id)},
+                },
+            )
             return None
 
     def list_tasks(self, conversation_id: str) -> list[Task]:

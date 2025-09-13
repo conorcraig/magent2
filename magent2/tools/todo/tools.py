@@ -61,7 +61,7 @@ def create_task_tool(
             extra={
                 "event": "tool_call",
                 "tool": "todo.create",
-                "metadata": {"conversation_id": cid},
+                "attributes": {"conversation_id": cid},
             },
         )
         metrics.increment(
@@ -80,7 +80,7 @@ def create_task_tool(
             extra={
                 "event": "tool_error",
                 "tool": "todo.create",
-                "metadata": {"error": str(e)[:200]},
+                "attributes": {"error": str(e)[:200]},
             },
         )
         metrics.increment(
@@ -105,7 +105,7 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_call",
                 "tool": "todo.get",
-                "metadata": {"task_id": tid},
+                "attributes": {"task_id": tid},
             },
         )
         metrics.increment(
@@ -124,7 +124,7 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_error",
                 "tool": "todo.get",
-                "metadata": {"error": str(e)[:200]},
+                "attributes": {"error": str(e)[:200]},
             },
         )
         metrics.increment(
@@ -149,7 +149,7 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_call",
                 "tool": "todo.list",
-                "metadata": {"conversation_id": cid},
+                "attributes": {"conversation_id": cid},
             },
         )
         metrics.increment(
@@ -168,7 +168,7 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_error",
                 "tool": "todo.list",
-                "metadata": {"error": str(e)[:200]},
+                "attributes": {"error": str(e)[:200]},
             },
         )
         metrics.increment(
@@ -204,7 +204,7 @@ def update_task_tool(
             extra={
                 "event": "tool_call",
                 "tool": "todo.update",
-                "metadata": {"task_id": tid},
+                "attributes": {"task_id": tid},
             },
         )
         metrics.increment(
@@ -223,7 +223,7 @@ def update_task_tool(
             extra={
                 "event": "tool_error",
                 "tool": "todo.update",
-                "metadata": {"error": str(e)[:200]},
+                "attributes": {"error": str(e)[:200]},
             },
         )
         metrics.increment(
@@ -248,7 +248,7 @@ def delete_task_tool(task_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_call",
                 "tool": "todo.delete",
-                "metadata": {"task_id": tid},
+                "attributes": {"task_id": tid},
             },
         )
         metrics.increment(
@@ -262,7 +262,7 @@ def delete_task_tool(task_id: str) -> dict[str, Any]:
             extra={
                 "event": "tool_error",
                 "tool": "todo.delete",
-                "metadata": {"error": str(e)[:200]},
+                "attributes": {"error": str(e)[:200]},
             },
         )
         metrics.increment(

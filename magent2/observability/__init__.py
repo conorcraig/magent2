@@ -17,6 +17,7 @@ SENSITIVE_KEYS = {"openai_api_key", "api_key", "token", "authorization", "passwo
 
 
 def _iso_now() -> str:
+    # Original precise ISO8601 with timezone offset
     return dt.datetime.now(dt.UTC).isoformat()
 
 
@@ -39,17 +40,22 @@ def _redact(obj: Any) -> Any:
 
 
 def _build_base_payload(record: logging.LogRecord) -> dict[str, Any]:
+    service = (
+        getattr(record, "service", None)
+        or getattr(record, "svc", None)
+        or os.getenv("SERVICE_NAME")
+    )
     return {
         "ts": _iso_now(),
         "level": record.levelname.lower(),
-        "logger": record.name,
-        "message": record.getMessage(),
+        "service": service,
+        "msg": record.getMessage(),
     }
 
 
 def _add_standard_extras(payload: dict[str, Any], record: logging.LogRecord) -> None:
+    # Include standardized fields; caller should pass 'attributes' explicitly when needed
     for attr in (
-        "metadata",
         "event",
         "span_id",
         "parent_id",
@@ -58,6 +64,9 @@ def _add_standard_extras(payload: dict[str, Any], record: logging.LogRecord) -> 
         "conversation_id",
         "agent",
         "tool",
+        "trace_id",
+        "request_id",
+        "attributes",
     ):
         if hasattr(record, attr):
             payload[attr] = getattr(record, attr)
@@ -78,10 +87,10 @@ def _enrich_with_context(payload: dict[str, Any]) -> None:
                 payload[key] = value
 
 
-def _redact_metadata_in_payload(payload: dict[str, Any]) -> None:
-    md = payload.get("metadata")
-    if isinstance(md, dict):
-        payload["metadata"] = _redact(md)
+def _redact_attributes_in_payload(payload: dict[str, Any]) -> None:
+    attributes = payload.get("attributes")
+    if isinstance(attributes, dict):
+        payload["attributes"] = _redact(attributes)
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -90,7 +99,20 @@ class JsonLogFormatter(logging.Formatter):
         _add_standard_extras(payload, record)
         _add_span_name(payload, record)
         _enrich_with_context(payload)
-        _redact_metadata_in_payload(payload)
+        _redact_attributes_in_payload(payload)
+        # Attach error fields if present, keeping the JSON single-line
+        if record.exc_info:
+            try:
+                exc_type, exc_value, exc_tb = record.exc_info
+                payload["err_type"] = getattr(exc_type, "__name__", str(exc_type))
+                if exc_value is not None:
+                    payload["err"] = str(exc_value)
+                try:
+                    payload["stack"] = self.formatException(record.exc_info)
+                except Exception:
+                    pass
+            except Exception:
+                pass
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -116,8 +138,14 @@ class ConsoleLogFormatter(logging.Formatter):
         conv_id = getattr(record, "conversation_id", None)
         event = getattr(record, "event", None)
         agent = getattr(record, "agent", None)
+        svc = getattr(record, "service", None) or getattr(record, "svc", None)
 
-        parts: list[str] = [ts, level, name]
+        parts: list[str] = [ts, level]
+        if svc:
+            parts.append(str(svc))
+        else:
+            # fall back to logger name if svc missing
+            parts.append(name)
         if event:
             parts.append(str(event))
         if agent:
@@ -138,7 +166,14 @@ class ConsoleLogFormatter(logging.Formatter):
 
 
 def _choose_formatter() -> logging.Formatter:
-    format_pref = (os.getenv("LOG_FORMAT") or "").strip().lower() or "json"
+    format_pref = (os.getenv("LOG_FORMAT") or "").strip().lower() or "auto"
+    if format_pref == "auto":
+        try:
+            if sys.stdout.isatty():
+                return ConsoleLogFormatter()
+        except Exception:
+            pass
+        return JsonLogFormatter()
     if format_pref == "console":
         return ConsoleLogFormatter()
     return JsonLogFormatter()
@@ -181,6 +216,36 @@ def get_json_logger(name: str = "magent2") -> logging.Logger:
     return logger
 
 
+def configure_uvicorn_logging() -> None:
+    """Bind uvicorn loggers to use our formatter/levels.
+
+    - Applies to: "uvicorn", "uvicorn.error", "uvicorn.access".
+    - Replaces existing handlers with a single StreamHandler using our formatter.
+    - Respects LOG_LEVEL/LOG_MODULE_LEVELS via _level_for_logger.
+    """
+    try:
+        for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            lg = logging.getLogger(name)
+            # Remove existing handlers to avoid double logging
+            for h in list(lg.handlers):
+                try:
+                    lg.removeHandler(h)
+                except Exception:
+                    pass
+                try:
+                    h.close()
+                except Exception:
+                    pass
+            handler = logging.StreamHandler(stream=sys.stdout)
+            handler.setFormatter(_choose_formatter())
+            lg.addHandler(handler)
+            lg.setLevel(_level_for_logger(name))
+            lg.propagate = False
+    except Exception:
+        # Best-effort; avoid breaking app startup if logging tweak fails
+        pass
+
+
 @dataclass
 class Span:
     span_id: str
@@ -216,7 +281,7 @@ class Tracer:
                 "span_name": name,
                 "span_id": span_id,
                 "parent_id": parent_id,
-                "metadata": dict(metadata or {}),
+                "kv": dict(metadata or {}),
             },
         )
         self._stack.append(span)

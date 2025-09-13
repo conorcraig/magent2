@@ -4,6 +4,7 @@ import importlib
 import os
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -114,10 +115,19 @@ def _load_policy_from_env() -> TerminalPolicy:
     substrings = _split_csv_env("TERMINAL_REDACT_SUBSTRINGS")
     patterns = _split_csv_env("TERMINAL_REDACT_PATTERNS")
 
-    # Always-apply built-in safe patterns
+    # Always-apply built-in safe patterns (broader than tool-level for defense-in-depth)
     patterns += [
+        # OpenAI-style keys
         r"sk-[A-Za-z0-9_-]{10,}",
+        # JWTs (three base64url segments)
+        r"\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+        # Authorization headers and tokens
+        r"(?i)\bAuthorization\b\s*[:=]\s*Bearer\s+[A-Za-z0-9._-]{8,}",
+        r"(?i)\bBearer\s+[A-Za-z0-9._-]{8,}",
+        # Generic sensitive labels
         r"(?i)(api_key|authorization|token|password|secret)\s*[:=]",
+        # Long hex tokens
+        r"\b[0-9a-fA-F]{32,}\b",
     ]
 
     return TerminalPolicy(
@@ -164,6 +174,16 @@ def _redact_text(text: str, substrings: list[str], patterns: list[str]) -> str:
             continue
     # Also redact values attached to sensitive labels
     redacted = _redact_label_values(redacted)
+    # Optional: heuristic high-entropy token masking (conservative)
+    try:
+        # Very long unbroken tokens with mixed charset => likely secrets; limit false positives
+        redacted = re.sub(
+            r"\b(?=[A-Za-z0-9/_+=-]*[A-Z])(?=[A-Za-z0-9/_+=-]*[a-z])(?=[A-Za-z0-9/_+=-]*[0-9])[A-Za-z0-9/_+=-]{40,}\b",
+            "[REDACTED]",
+            redacted,
+        )
+    except re.error:
+        pass
     return redacted
 
 
@@ -186,12 +206,13 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
     )
 
     try:
+        start_ns = time.perf_counter_ns()
         logger.info(
             "tool call",
             extra={
                 "event": "tool_call",
                 "tool": "terminal.run",
-                "metadata": {
+                "attributes": {
                     "cwd": cwd or "",
                     "command": command.split(" ")[0] if command else "",
                 },
@@ -219,6 +240,21 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 "event": "tool_success",
                 "tool": "terminal.run",
                 "metadata": _success_metadata(cwd, command, result),
+            },
+        )
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
+                "attributes": {
+                    "exit": result.get("exit_code"),
+                    "timeout": bool(result.get("timeout")),
+                    "truncated": bool(result.get("truncated")),
+                    "duration_ms": duration_ms,
+                    "output_len": len(concise),
+                },
             },
         )
         return f"{status}\noutput:\n{concise}"
