@@ -20,6 +20,9 @@ def test_allocate_branch_creates_and_checks_out(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     assert _run(["git", "init"], str(repo)) == 0
+    # Configure identity for commit in isolated temp repo
+    assert _run(["git", "config", "user.email", "test@example.com"], str(repo)) == 0
+    assert _run(["git", "config", "user.name", "Test User"], str(repo)) == 0
     (repo / "a.txt").write_text("hi")
     assert _run(["git", "add", "."], str(repo)) == 0
     assert _run(["git", "commit", "-m", "init"], str(repo)) == 0

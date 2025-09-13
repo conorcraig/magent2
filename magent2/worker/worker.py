@@ -140,10 +140,12 @@ class Worker:
                     topic = (
                         orch.get("done_topic") if isinstance(orch, dict) else None
                     )
-                    if isinstance(topic, str) and topic.strip():
+                    if isinstance(topic, str):
+                        topic = topic.strip()
+                    if isinstance(topic, str) and topic.startswith("signal:") and len(topic) <= 256:
                         from magent2.tools.signals.impl import send_signal
 
-                        send_signal(topic.strip(), {"ok": True})
+                        send_signal(topic, {"ok": True})
                 except Exception:
                     pass
             except Exception:
