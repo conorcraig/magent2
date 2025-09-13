@@ -22,13 +22,13 @@ services:
         condition: service_healthy
     ports:
       - "8000"
-    stop_grace_period: 1s
+    stop_grace_period: 15s
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import http.client as h; c=h.HTTPConnection(\"localhost\",8000,timeout=1); c.request(\"GET\",\"/health\"); r=c.getresponse(); exit(0 if r.status<500 else 1)' "]
+      test: ["CMD-SHELL", "python -c 'import http.client as h; c=h.HTTPConnection(\"localhost\",8000,timeout=3); c.request(\"GET\",\"/health\"); r=c.getresponse(); exit(0 if r.status<500 else 1)' "]
       interval: 10s
-      timeout: 1s
-      retries: 3
-      start_period: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
 
   worker:
     build: .
@@ -46,10 +46,10 @@ services:
       redis:
         condition: service_healthy
     command: ["python", "-m", "magent2.worker"]
-    stop_grace_period: 1s
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.settimeout(1); s.connect((\"redis\",6379)); s.close()' "]
+      test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect((\"redis\",6379)); s.close()' "]
       interval: 10s
-      timeout: 1s
-      retries: 3
-      start_period: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
