@@ -1,3 +1,5 @@
+# PR: Orchestrated multi-agent teams (Issue #70)
+
 ## Summary
 
 This PR advances Issue #70 (Orchestrated multi-agent teams) while keeping the system single-agent-typed. Any agent instance can orchestrate by calling tools; no separate orchestrator class is introduced.

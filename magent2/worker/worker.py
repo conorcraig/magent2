@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-
 import os
 import random
 import time
 import traceback
-
 import uuid
 from collections.abc import Iterable
 from typing import Any, Protocol
@@ -116,38 +114,8 @@ class Worker:
             )
             errored = False
             try:
-                for event in self._runner.stream_run(envelope):
-                    if isinstance(event, BaseStreamEvent):
-                        # JSON mode ensures datetimes and other types are serialized safely
-                        payload: dict[str, Any] = event.model_dump(mode="json")
-                    else:
-                        # The runner protocol guarantees dict[str, Any] for non-BaseStreamEvent
-                        payload = event
-                    self._bus.publish(
-                        stream_topic,
-                        BusMessage(topic=stream_topic, payload=payload),
-                    )
-                # Optional child auto-complete behavior:
-                # if message carries a done_topic hint and the env gate is enabled,
-                # emit a done signal.
-                try:
-                    auto_gate = os.getenv("AUTO_CHILD_SIGNAL_DONE", "0").strip() == "1"
-                    if not auto_gate:
-                        return
-
-                    meta = envelope.metadata or {}
-                    orch = meta.get("orchestrate") if isinstance(meta, dict) else None
-                    topic = (
-                        orch.get("done_topic") if isinstance(orch, dict) else None
-                    )
-                    if isinstance(topic, str):
-                        topic = topic.strip()
-                    if isinstance(topic, str) and topic.startswith("signal:") and len(topic) <= 256:
-                        from magent2.tools.signals.impl import send_signal
-
-                        send_signal(topic, {"ok": True})
-                except Exception:
-                    pass
+                self._stream_runner_events(envelope, stream_topic)
+                self._maybe_emit_done_signal(envelope)
             except Exception:
                 errored = True
                 logger.exception(
@@ -183,6 +151,37 @@ class Worker:
                             "conversation_id": envelope.conversation_id,
                         },
                     )
+
+    def _stream_runner_events(self, envelope: MessageEnvelope, stream_topic: str) -> None:
+        """Stream events from the runner and publish to the bus as JSON-safe dicts."""
+        for event in self._runner.stream_run(envelope):
+            if isinstance(event, BaseStreamEvent):
+                payload: dict[str, Any] = event.model_dump(mode="json")
+            else:
+                payload = event
+            self._bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=payload))
+
+    def _maybe_emit_done_signal(self, envelope: MessageEnvelope) -> None:
+        """Emit a done signal when opt-in gate is enabled and metadata hints exist."""
+        try:
+            auto_gate = os.getenv("AUTO_CHILD_SIGNAL_DONE", "0").strip() == "1"
+            if not auto_gate:
+                return
+
+            meta = envelope.metadata or {}
+            orchestrate_block = meta.get("orchestrate") if isinstance(meta, dict) else None
+            topic = (
+                orchestrate_block.get("done_topic") if isinstance(orchestrate_block, dict) else None
+            )
+            if isinstance(topic, str):
+                topic = topic.strip()
+            if isinstance(topic, str) and topic.startswith("signal:") and len(topic) <= 256:
+                from magent2.tools.signals.impl import send_signal
+
+                send_signal(topic, {"ok": True})
+        except Exception:
+            # Best-effort; suppress to avoid impacting the main run
+            pass
 
     # --- Enhancements for robustness (Issue #38) ---
     def _run_and_stream_with_retry(self, envelope: MessageEnvelope) -> bool:

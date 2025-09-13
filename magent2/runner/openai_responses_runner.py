@@ -35,4 +35,3 @@ class OpenAIResponsesRunner:
 
 
 __all__ = ["OpenAIResponsesRunner"]
-

@@ -159,4 +159,3 @@ __all__ = [
     "get_registry",
     "reset_registry_for_testing",
 ]
-

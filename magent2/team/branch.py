@@ -64,4 +64,3 @@ def allocate_branch(*, repo_root: str, agent_name: str, ticket: str | None = Non
 
 
 __all__ = ["Branch", "BranchError", "allocate_branch"]
-

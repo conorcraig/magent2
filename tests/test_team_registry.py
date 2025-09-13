@@ -35,4 +35,3 @@ def test_window_person_set_get() -> None:
     reg = TeamRegistry()
     reg.set_window_person("TeamX", "alice@example.com")
     assert reg.get_window_person("TeamX") == "alice@example.com"
-

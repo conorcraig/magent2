@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from magent2.bus.interface import Bus, BusMessage
@@ -49,7 +48,12 @@ def test_orchestrate_split_metadata_and_topics(monkeypatch):
         )
         assert res["ok"] is True
         assert len(res["children"]) == 2
-        assert all(t.startswith("signal:") and t.endswith(":done") for t in res["topics"])  # type: ignore[index]
+        topics_val = res.get("topics")
+        assert isinstance(topics_val, list)
+        assert all(
+            isinstance(t, str) and t.startswith("signal:") and t.endswith(":done")
+            for t in topics_val
+        )
 
         # Check that messages were published to the agent topic with structured metadata
         agent_topic = "chat:AgentX"
@@ -69,8 +73,8 @@ def test_orchestrate_split_metadata_and_topics(monkeypatch):
 
 def test_worker_auto_signal_done(monkeypatch):
     # Ensure worker reads done_topic from metadata and sends signal
-    from magent2.worker.worker import Worker
     from magent2.models.envelope import MessageEnvelope
+    from magent2.worker.worker import Worker
 
     bus = _MemoryBus()
     set_signal_bus(bus)
@@ -95,7 +99,7 @@ def test_worker_auto_signal_done(monkeypatch):
             },
         )
         # Publish inbound to agent topic
-        bus.publish(f"chat:DevAgent", BusMessage(topic=f"chat:DevAgent", payload=env.model_dump()))
+        bus.publish("chat:DevAgent", BusMessage(topic="chat:DevAgent", payload=env.model_dump()))
         processed = worker.process_available()
         assert processed == 1
         # Verify signal was emitted
@@ -107,7 +111,8 @@ def test_worker_auto_signal_done(monkeypatch):
 
 
 class _NoopRunner:
-    def stream_run(self, envelope) -> list[dict[str, Any]]:  # type: ignore[no-untyped-def]
+    def stream_run(self, envelope: Any) -> list[dict[str, Any]]:
         # Emit a minimal output event to exercise the stream path
-        return [OutputEvent(conversation_id=envelope.conversation_id, text="ok").model_dump(mode="json")]
-
+        return [
+            OutputEvent(conversation_id=envelope.conversation_id, text="ok").model_dump(mode="json")
+        ]

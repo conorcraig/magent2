@@ -9,9 +9,7 @@ from magent2.team.branch import BranchError, allocate_branch
 
 
 def _run(cmd: list[str], cwd: str) -> int:
-    proc = subprocess.run(
-        cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    proc = subprocess.run(cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc.returncode
 
 
@@ -39,4 +37,3 @@ def test_allocate_branch_creates_and_checks_out(tmp_path: Path) -> None:
 def test_allocate_branch_fails_outside_git(tmp_path: Path) -> None:
     with pytest.raises(BranchError):
         allocate_branch(repo_root=str(tmp_path), agent_name="BotB")
-
