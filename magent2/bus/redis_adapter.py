@@ -90,6 +90,68 @@ class RedisBus(Bus):
         return list(self._read_blocking_without_group(topic, last_id, limit, block_ms))
 
     # ----------------------------
+    # Blocking helpers (optional API used by signals)
+    # ----------------------------
+    def read_blocking_one(
+        self, topic: str, last_id: str | None, block_ms: int
+    ) -> BusMessage | None:
+        """Block up to block_ms waiting for one new message after last_id.
+
+        This uses XREAD with a block to await new entries when last_id is None or
+        a Redis entry id. When last_id is a UUID, it scans to locate the entry id
+        first, then blocks for messages strictly after it.
+        """
+        # Resolve an entry id cursor if needed
+        cursor_id = None
+        if last_id is None:
+            # Start from the end; block for the next message
+            cursor_id = "$"
+        elif self._is_entry_id(last_id):
+            cursor_id = last_id
+        else:
+            cursor_id = self._scan_for_uuid(topic, last_id, chunk_size=200) or "$"
+
+        # Block for one new message after cursor_id
+        resp = self._redis.xread(streams={topic: cursor_id}, count=1, block=max(1, int(block_ms)))
+        if not resp:
+            return None
+        _, items = resp[0]
+        if not items:
+            return None
+        entry_id, data = items[0]
+        return self._to_bus_message(topic, data, entry_id)
+
+    def read_any_blocking(
+        self, topics: list[str], cursors: dict[str, str | None], block_ms: int
+    ) -> tuple[str, BusMessage] | None:
+        """Block up to block_ms for any new message on topics after respective cursors.
+
+        Uses XREAD across multiple streams with a block. Cursors use "$" to mean
+        "from now" semantics, or a specific entry id to read after. UUID cursors are
+        first translated to entry ids via a bounded scan.
+        """
+        # Build stream cursor map
+        streams: dict[str, str] = {}
+        for t in topics:
+            cur = cursors.get(t)
+            if cur is None:
+                streams[t] = "$"
+            elif self._is_entry_id(cur):
+                streams[t] = cur
+            else:
+                entry = self._scan_for_uuid(t, cur, chunk_size=200)
+                streams[t] = entry if entry is not None else "$"
+
+        resp = self._redis.xread(streams=streams, count=1, block=max(1, int(block_ms)))
+        if not resp:
+            return None
+        stream, items = resp[0]
+        if not items:
+            return None
+        entry_id, data = items[0]
+        return stream, self._to_bus_message(stream, data, entry_id)
+
+    # ----------------------------
     # Internal helpers
     # ----------------------------
     def _read_without_group(
