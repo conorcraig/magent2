@@ -112,6 +112,9 @@ class Worker:
                 {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
             )
             errored = False
+            # Track tool call/error counters for this run (best-effort via Metrics snapshot)
+            tool_calls_before = len([e for e in metrics.snapshot() if e.get("name") == "tool_calls"])  # type: ignore[union-attr]
+            tool_errors_before = len([e for e in metrics.snapshot() if e.get("name") == "tool_errors"])  # type: ignore[union-attr]
             try:
                 for event in self._runner.stream_run(envelope):
                     if isinstance(event, BaseStreamEvent):
@@ -143,6 +146,12 @@ class Worker:
                 raise
             finally:
                 if not errored:
+                    # Compute delta counts since run start
+                    snap_after = metrics.snapshot()
+                    tool_calls_after = len([e for e in snap_after if e.get("name") == "tool_calls"])  # type: ignore[union-attr]
+                    tool_errors_after = len([e for e in snap_after if e.get("name") == "tool_errors"])  # type: ignore[union-attr]
+                    run_tool_calls = max(0, tool_calls_after - tool_calls_before)
+                    run_tool_errors = max(0, tool_errors_after - tool_errors_before)
                     logger.info(
                         "run completed",
                         extra={
@@ -150,6 +159,7 @@ class Worker:
                             "run_id": run_id,
                             "conversation_id": envelope.conversation_id,
                             "agent": self._agent_name,
+                            "kv": {"tool_calls": run_tool_calls, "tool_errors": run_tool_errors},
                         },
                     )
                     metrics.increment(

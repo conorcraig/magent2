@@ -4,6 +4,8 @@ import importlib
 import os
 import re
 from dataclasses import dataclass
+import os
+import shlex
 from typing import Any
 
 from magent2.observability import get_json_logger, get_metrics, get_run_context
@@ -122,7 +124,11 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         )
         metrics.increment(
             "tool_calls",
-            {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))},
+            {
+                "tool": "terminal",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         result: dict[str, Any] = tool.run(command, cwd=cwd)
 
@@ -139,22 +145,79 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             f"timeout={_b(result.get('timeout'))} "
             f"truncated={_b(result.get('truncated'))}"
         )
+        # Success log for observability
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
+                "metadata": {
+                    "cwd": cwd or "",
+                    "command": command.split(" ")[0] if command else "",
+                    "exit": result.get("exit_code"),
+                    "timeout": bool(result.get("timeout")),
+                    "truncated": bool(result.get("truncated")),
+                },
+            },
+        )
         return f"{status}\noutput:\n{concise}"
     except Exception as exc:  # noqa: BLE001
         # Convert exceptions into a concise, redacted failure string
         msg = _redact_text(str(exc), policy.redact_substrings, policy.redact_patterns)
         concise_err = msg[: policy.function_output_max_chars]
+        # Enrich terminal policy context for denials
+        policy_reason: str | None = None
+        deny_prefix: str | None = None
+        allowed_count = len(policy.allowed_commands)
+        allowed_sample = policy.allowed_commands[:5]
+        cwd_effective: str | None = None
+        try:
+            # Resolve effective cwd if sandboxing applies (best effort)
+            cwd_effective = getattr(tool, "_resolve_working_dir")(cwd)  # type: ignore[misc]
+        except Exception:
+            cwd_effective = None
+        try:
+            tokens = shlex.split(command or "")
+            raw = tokens[0] if tokens else ""
+            cmd = os.path.basename(raw) if raw else ""
+            # Detect denylist match
+            for prefix in getattr(tool, "deny_command_prefixes", []) or []:
+                if (cmd and cmd.startswith(prefix)) or (raw and raw.startswith(prefix)):
+                    deny_prefix = prefix
+                    break
+            if isinstance(exc, PermissionError):
+                text = str(exc).lower()
+                if deny_prefix is not None or "denied by policy" in text:
+                    policy_reason = "denylist"
+                elif "not allowed" in text:
+                    policy_reason = "allowlist"
+        except Exception:
+            # Best-effort enrichment only
+            pass
+
         logger.error(
             "tool error",
             extra={
                 "event": "tool_error",
                 "tool": "terminal.run",
-                "metadata": {"error": concise_err[:200]},
+                "metadata": {
+                    "error": concise_err[:200],
+                    "policy_reason": policy_reason,
+                    "allowed_count": allowed_count,
+                    "allowed_sample": allowed_sample,
+                    "deny_prefix": deny_prefix or "",
+                    "cwd_effective": cwd_effective or "",
+                    "command": (command.split(" ")[0] if command else ""),
+                },
             },
         )
         metrics.increment(
             "tool_errors",
-            {"tool": "terminal", "conversation_id": str(ctx.get("conversation_id", ""))},
+            {
+                "tool": "terminal",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return "ok=false exit=None timeout=false truncated=false\nerror:\n" + concise_err
 

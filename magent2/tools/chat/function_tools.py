@@ -126,10 +126,22 @@ def send_message(
     )
     metrics.increment(
         "tool_calls",
-        {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))},
+        {
+            "tool": "chat",
+            "conversation_id": str(ctx.get("conversation_id", "")),
+            "run_id": str(ctx.get("run_id", "")),
+        },
     )
     try:
         published_to = _publish(bus, env)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "chat.send",
+                "metadata": {"recipient": rec, "published_to": published_to},
+            },
+        )
         return {"ok": True, "envelope_id": env.id, "published_to": published_to}
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -141,6 +153,11 @@ def send_message(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "chat",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         raise
