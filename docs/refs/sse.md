@@ -30,6 +30,21 @@ const es = new EventSource("/stream");
 es.onmessage = (e) => console.log(JSON.parse(e.data));
 ```
 
+## Gateway SSE semantics
+
+- Token events:
+  - The gateway forwards all `token` events in order as they are produced to enable real‑time incremental rendering.
+  - Clients may render tokens incrementally; the final `output` still contains the complete text.
+- Output event:
+  - The complete assistant text is delivered via a single `output` event at the end of the turn.
+  - Clients SHOULD render final text from `output.text`.
+- Tool step events:
+  - `tool_step` events are forwarded as-is for progress/trace UX.
+
+Notes:
+
+- The `max_events` query parameter on `/stream/{conversation_id}` is intended for testing/tools and not a stability guarantee for public clients.
+
 ## References
 
 - MDN SSE overview; FastAPI StreamingResponse; reverse proxy buffering notes

@@ -128,15 +128,16 @@ def build_runner_from_env() -> Runner:
         agent = Agent(
             name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model, tools=_tools_any
         )
-        tool_names = ",".join([getattr(t, "__name__", "tool") for t in tools]) or "<none>"
+        # Structured tools discovery for observability
+        tool_names_list = [getattr(t, "__name__", "tool") for t in tools]
         get_json_logger("magent2").info(
             "runner selected",
             extra={
                 "event": "runner_selected",
-                "runner": "OpenAI",
+                "service": "worker",
                 "agent": cfg.agent_name,
                 "model": cfg.model,
-                "metadata": {"tools": tool_names},
+                "kv": {"tools": tool_names_list, "tool_count": len(tool_names_list)},
             },
         )
         return OpenAIAgentsRunner(agent)
@@ -155,7 +156,12 @@ def build_runner_from_env() -> Runner:
         return OpenAIResponsesRunner(model)
     get_json_logger("magent2").info(
         "runner selected",
-        extra={"event": "runner_selected", "runner": "Echo", "agent": cfg.agent_name},
+        extra={
+            "event": "runner_selected",
+            "service": "worker",
+            "runner": "Echo",
+            "agent": cfg.agent_name,
+        },
     )
     return EchoRunner()
 

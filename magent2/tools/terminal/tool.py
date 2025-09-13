@@ -158,8 +158,17 @@ class TerminalTool:
 
     @staticmethod
     def _redact_output(text: str, patterns: Iterable[re.Pattern[str]] | None = None) -> str:
+        # Built-in conservative patterns for common secrets/tokens.
+        # Keep false-positive risk low; broader/optional redaction happens in the function layer.
         secret_patterns: list[re.Pattern[str]] = [
-            re.compile(r"sk-[A-Za-z0-9]{6,}"),
+            # OpenAI-style keys
+            re.compile(r"sk-[A-Za-z0-9_-]{10,}"),
+            # JWTs (three base64url segments)
+            re.compile(r"\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+            # Authorization bearer values
+            re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._-]{8,}"),
+            # Long hex tokens
+            re.compile(r"\b[0-9a-fA-F]{32,}\b"),
         ]
         for pat in patterns or secret_patterns:
             text = pat.sub("[REDACTED]", text)

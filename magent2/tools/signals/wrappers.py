@@ -22,26 +22,44 @@ def signal_send(topic: str, payload: dict[str, Any] | None = None) -> dict[str, 
         extra={
             "event": "tool_call",
             "tool": "signals.send",
-            "metadata": {"topic": topic},
+            "attributes": {"topic": topic},
         },
     )
     metrics.increment(
-        "tool_calls", {"tool": "signals", "conversation_id": str(ctx.get("conversation_id", ""))}
+        "tool_calls",
+        {
+            "tool": "signals",
+            "conversation_id": str(ctx.get("conversation_id", "")),
+            "run_id": str(ctx.get("run_id", "")),
+        },
     )
     try:
-        return _send_signal_impl(topic, payload or {})
+        result = _send_signal_impl(topic, payload or {})
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "signals.send",
+                "metadata": {"topic": topic},
+            },
+        )
+        return result
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "tool error",
             extra={
                 "event": "tool_error",
                 "tool": "signals.send",
-                "metadata": {"error": str(exc)[:200]},
+                "attributes": {"error": str(exc)[:200]},
             },
         )
         metrics.increment(
             "tool_errors",
-            {"tool": "signals", "conversation_id": str(ctx.get("conversation_id", ""))},
+            {
+                "tool": "signals",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         raise
 
@@ -56,26 +74,44 @@ def signal_wait(topic: str, last_id: str | None = None, timeout_ms: int = 30000)
         extra={
             "event": "tool_call",
             "tool": "signals.wait",
-            "metadata": {"topic": topic, "timeout_ms": timeout_ms},
+            "attributes": {"topic": topic, "timeout_ms": timeout_ms},
         },
     )
     metrics.increment(
-        "tool_calls", {"tool": "signals", "conversation_id": str(ctx.get("conversation_id", ""))}
+        "tool_calls",
+        {
+            "tool": "signals",
+            "conversation_id": str(ctx.get("conversation_id", "")),
+            "run_id": str(ctx.get("run_id", "")),
+        },
     )
     try:
-        return _wait_for_signal_impl(topic, last_id=last_id, timeout_ms=timeout_ms)
+        result = _wait_for_signal_impl(topic, last_id=last_id, timeout_ms=timeout_ms)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "signals.wait",
+                "metadata": {"topic": topic},
+            },
+        )
+        return result
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "tool error",
             extra={
                 "event": "tool_error",
                 "tool": "signals.wait",
-                "metadata": {"error": str(exc)[:200]},
+                "attributes": {"error": str(exc)[:200]},
             },
         )
         metrics.increment(
             "tool_errors",
-            {"tool": "signals", "conversation_id": str(ctx.get("conversation_id", ""))},
+            {
+                "tool": "signals",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         raise
 

@@ -36,6 +36,15 @@ class InMemoryBus(Bus):
                 break
         return list(items[start : start + limit])
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        return self.read(topic, last_id=last_id, limit=limit)
+
 
 @pytest.mark.asyncio
 async def test_gateway_send_publishes_to_chat_topic() -> None:
@@ -136,6 +145,19 @@ async def test_gateway_stream_relays_sse_events() -> None:
             BusMessage(
                 topic=stream_topic,
                 payload={
+                    "event": "token",
+                    "conversation_id": conversation_id,
+                    "text": " there",
+                    "index": 1,
+                },
+            ),
+        )
+        await asyncio.sleep(0.05)
+        bus.publish(
+            stream_topic,
+            BusMessage(
+                topic=stream_topic,
+                payload={
                     "event": "output",
                     "conversation_id": conversation_id,
                     "text": "Done",
@@ -148,7 +170,7 @@ async def test_gateway_stream_relays_sse_events() -> None:
     ) as client:
         pub_task = asyncio.create_task(publisher())
 
-        async with client.stream("GET", f"/stream/{conversation_id}?max_events=2") as resp:
+        async with client.stream("GET", f"/stream/{conversation_id}?max_events=3") as resp:
             assert resp.status_code == 200
             assert resp.headers.get("content-type", "").startswith("text/event-stream")
             seen: list[dict] = []
@@ -158,15 +180,17 @@ async def test_gateway_stream_relays_sse_events() -> None:
                 if line.startswith("data: "):
                     payload = json.loads(line[len("data: ") :])
                     seen.append(payload)
-                    if len(seen) == 2:
+                    if len(seen) == 3:
                         break
 
         await pub_task
 
     assert seen[0]["event"] == "token"
     assert seen[0]["text"] == "Hi"
-    assert seen[1]["event"] == "output"
-    assert seen[1]["text"] == "Done"
+    assert seen[1]["event"] == "token"
+    assert seen[1]["text"] == " there"
+    assert seen[2]["event"] == "output"
+    assert seen[2]["text"] == "Done"
 
 
 @pytest.mark.asyncio

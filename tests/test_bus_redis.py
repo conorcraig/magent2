@@ -82,3 +82,46 @@ def test_redis_bus_consumer_group_ack(redis_url: str) -> None:
     pending = _pending_count_raw(client, topic, group)
     if pending >= 0:
         assert pending == 0
+
+
+def test_redis_bus_blocking_read_no_group_timeout(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    bus = RedisBus(redis_url=redis_url)
+
+    # No messages yet; blocking read should timeout and return empty list
+    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=200))
+    assert out == []
+
+
+def test_redis_bus_blocking_read_receives_new_messages(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    bus = RedisBus(redis_url=redis_url)
+
+    # Publish a baseline message to establish a cursor
+    baseline_id = bus.publish(topic, BusMessage(topic=topic, payload={"n": 1}))
+    assert baseline_id
+    # Publish the next message we expect to read via blocking API
+    target_id = bus.publish(topic, BusMessage(topic=topic, payload={"n": 42}))
+    assert target_id
+    # Use read_blocking with last_id set to the baseline message id; should return the target
+    out = list(bus.read_blocking(topic, last_id=baseline_id, limit=10, block_ms=500))
+    assert len(out) >= 1
+    assert any(m.id == target_id for m in out)
+
+
+def test_redis_bus_blocking_read_with_group(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    group = f"g-{uuid.uuid4()}"
+    bus = RedisBus(redis_url=redis_url, group_name=group, consumer_name="c1")
+
+    mid = bus.publish(topic, BusMessage(topic=topic, payload={"n": 7}))
+    assert mid
+    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=500))
+    assert len(out) >= 1
+    assert any(m.id == mid for m in out)
