@@ -35,6 +35,15 @@ class _MemoryBus(Bus):
             return []
         return items[idx + 1 : idx + 1 + limit]
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> list[BusMessage]:
+        return self.read(topic, last_id=last_id, limit=limit)
+
 
 def test_signal_send_and_wait_roundtrip() -> None:
     bus = _MemoryBus()

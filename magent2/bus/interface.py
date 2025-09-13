@@ -30,5 +30,18 @@ class Bus(Protocol):
     ) -> Iterable[BusMessage]:
         """Read messages after last_id (or tail if None)."""
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        """Block up to block_ms waiting for messages after last_id.
+
+        Returns an empty iterable on timeout. Implementations should prefer
+        native blocking primitives (e.g., Redis XREAD/XREADGROUP with BLOCK).
+        """
+
 
 __all__ = ["Bus", "BusMessage"]

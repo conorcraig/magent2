@@ -30,6 +30,16 @@ class InMemoryBus(Bus):
                 break
         return list(items[start : start + limit])
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        # In tests, emulate non-blocking by delegating to read; callers shouldn't depend on timing
+        return self.read(topic, last_id=last_id, limit=limit)
+
 
 def test_inmemory_bus_roundtrip() -> None:
     bus = InMemoryBus()
