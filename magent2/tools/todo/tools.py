@@ -65,7 +65,12 @@ def create_task_tool(
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=md or {})
         return {"task": _serialize_task(t)}
@@ -79,7 +84,12 @@ def create_task_tool(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
@@ -99,7 +109,12 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().get_task(tid)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
@@ -113,7 +128,12 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
@@ -133,7 +153,12 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         tasks = _get_store().list_tasks(cid)
         return {"tasks": [_serialize_task(t) for t in tasks]}
@@ -147,7 +172,12 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"tasks": [], "error": str(e), "transient": True}
 
@@ -178,7 +208,12 @@ def update_task_tool(
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().update_task(tid, title=title, completed=completed, metadata=md)
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
@@ -192,7 +227,12 @@ def update_task_tool(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
