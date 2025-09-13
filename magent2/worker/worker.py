@@ -103,8 +103,12 @@ class Worker:
 
             # Track tool call/error counters for this run (best-effort via Metrics snapshot)
             snap_before = metrics.snapshot()
-            tool_calls_before = len([e for e in snap_before if e.get("name") == "tool_calls"])
-            tool_errors_before = len([e for e in snap_before if e.get("name") == "tool_errors"])
+            tool_calls_before = sum(
+                int(e.get("value", 0)) for e in snap_before if e.get("name") == "tool_calls"
+            )
+            tool_errors_before = sum(
+                int(e.get("value", 0)) for e in snap_before if e.get("name") == "tool_errors"
+            )
             try:
                 for event in self._runner.stream_run(envelope):
                     self._publish_stream_event(stream_topic, event)
@@ -159,8 +163,8 @@ class Worker:
 
     def _compute_tool_counts(self, metrics: Any) -> tuple[int, int]:
         snap = metrics.snapshot()
-        calls = len([e for e in snap if e.get("name") == "tool_calls"])
-        errs = len([e for e in snap if e.get("name") == "tool_errors"])
+        calls = sum(int(e.get("value", 0)) for e in snap if e.get("name") == "tool_calls")
+        errs = sum(int(e.get("value", 0)) for e in snap if e.get("name") == "tool_errors")
         return calls, errs
 
     def _log_run_started(self, logger: Any, run_id: str, conversation_id: str) -> None:
