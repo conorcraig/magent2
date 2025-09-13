@@ -41,13 +41,15 @@ def _require_allowed_topic(topic: str) -> None:
 
 def _payload_cap_bytes() -> int | None:
     raw = os.getenv("SIGNAL_PAYLOAD_MAX_BYTES", "").strip()
+    # Default to 64KB when not configured
     if not raw:
-        return None
+        return 64 * 1024
     try:
         value = int(raw)
-        return value if value > 0 else None
+        return value if value > 0 else 64 * 1024
     except Exception:
-        return None
+        # On invalid value, fall back to default
+        return 64 * 1024
 
 
 def _ensure_payload_within_cap(payload: dict[str, Any]) -> int:
@@ -230,34 +232,45 @@ def wait_for_signal(topic: str, *, last_id: str | None, timeout_ms: int) -> dict
     bus = _get_bus()
     deadline = time.time() + (timeout_ms / 1000.0)
     cursor: str | None = last_id if last_id is not None else _get_persisted_cursor(name)
+
+    # Fast path: try a non-blocking read first
+    items = list(bus.read(name, last_id=cursor, limit=1))
+    if items:
+        m = items[0]
+        message_payload = m.payload
+        redacted = _redacted_signal_message(message_payload)
+        _set_persisted_cursor(name, m.id)
+        try:
+            payload_len = len(json.dumps(message_payload, separators=(",", ":")).encode("utf-8"))
+        except Exception:
+            payload_len = 0
+        _maybe_publish_stream_event(
+            {
+                "event": "signal_recv",
+                "topic": name,
+                "message_id": m.id,
+                "payload_len": payload_len,
+            }
+        )
+        return {"ok": True, "topic": name, "message": redacted, "message_id": m.id}
+
+    # If supported by the Bus (Redis), use a blocking read for the remaining time
+    remaining_ms = max(1, int((deadline - time.time()) * 1000))
+    read_blocking_one = getattr(bus, "read_blocking_one", None)
+    if callable(read_blocking_one) and remaining_ms > 0:
+        msg = read_blocking_one(name, cursor, remaining_ms)
+        if msg is not None:
+            return _process_message_for_return(name, msg)
+        # Timed out
+        return {"ok": False, "topic": name, "timeout_ms": timeout_ms, "last_id": cursor or ""}
+
+    # Fallback polling when blocking is unavailable
     while True:
+        if time.time() >= deadline:
+            return {"ok": False, "topic": name, "timeout_ms": timeout_ms, "last_id": cursor or ""}
         items = list(bus.read(name, last_id=cursor, limit=1))
         if items:
-            m = items[0]
-            # Redact payload before returning
-            message_payload = m.payload
-            redacted = _redacted_signal_message(message_payload)
-            # Persist cursor for this topic (if context available)
-            _set_persisted_cursor(name, m.id)
-            # SSE visibility (best effort)
-            try:
-                payload_len = len(
-                    json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
-                )
-            except Exception:
-                payload_len = 0
-            _maybe_publish_stream_event(
-                {
-                    "event": "signal_recv",
-                    "topic": name,
-                    "message_id": m.id,
-                    "payload_len": payload_len,
-                }
-            )
-            return {"ok": True, "topic": name, "message": redacted, "message_id": m.id}
-        if time.time() >= deadline:
-            # Return a structured timeout without raising, so the agent can decide to keep waiting
-            return {"ok": False, "topic": name, "timeout_ms": timeout_ms, "last_id": cursor or ""}
+            return _process_message_for_return(name, items[0])
         time.sleep(0.05)
 
 
@@ -269,12 +282,29 @@ def wait_for_any(
     bus = _get_bus()
     deadline = _deadline_from_timeout_ms(timeout_ms)
     cursors = _build_cursors(names, last_ids)
+
+    # Non-blocking sweep first
+    for name in names:
+        message = _read_one(bus, name, cursors[name])
+        if message is not None:
+            return _process_message_for_return(name, message)
+
+    # Blocking read across streams if supported
+    read_any_blocking = getattr(bus, "read_any_blocking", None)
+    remaining_ms = max(1, int((deadline - time.time()) * 1000))
+    if callable(read_any_blocking) and remaining_ms > 0:
+        result = read_any_blocking(names, cursors, remaining_ms)
+        if result is not None:
+            blk_name, blk_msg = result
+            return _process_message_for_return(blk_name, blk_msg)
+        return {"ok": False, "topics": names, "timeout_ms": timeout_ms}
+
+    # Fallback polling
     while True:
         for name in names:
             message = _read_one(bus, name, cursors[name])
-            if message is None:
-                continue
-            return _process_message_for_return(name, message)
+            if message is not None:
+                return _process_message_for_return(name, message)
         if time.time() >= deadline:
             return {"ok": False, "topics": names, "timeout_ms": timeout_ms}
         time.sleep(0.05)
@@ -289,18 +319,50 @@ def wait_for_all(
     deadline = _deadline_from_timeout_ms(timeout_ms)
     cursors = _build_cursors(names, last_ids)
     results: dict[str, dict[str, Any]] = {}
-    while True:
-        remaining = [n for n in names if n not in results]
-        for name in remaining:
-            message = _read_one(bus, name, cursors[name])
-            if message is None:
-                continue
+
+    # Initial non-blocking sweep
+    remaining = [n for n in names if n not in results]
+    for name in remaining:
+        message = _read_one(bus, name, cursors[name])
+        if message is not None:
             results[name] = _process_message_for_return(name, message)
+    if len(results) == len(names):
+        return {"ok": True, "messages": results}
+
+    # If supported, use blocking reads to accumulate the rest
+    read_any_blocking = getattr(bus, "read_any_blocking", None)
+    while time.time() < deadline and len(results) < len(names):
+        remaining = [n for n in names if n not in results]
+        # Non-blocking check to catch any recent arrivals
+        progressed = False
+        for name in list(remaining):
+            message = _read_one(bus, name, cursors[name])
+            if message is not None:
+                results[name] = _process_message_for_return(name, message)
+                progressed = True
         if len(results) == len(names):
             return {"ok": True, "messages": results}
-        if time.time() >= deadline:
-            return {"ok": False, "messages": results, "timeout_ms": timeout_ms}
-        time.sleep(0.05)
+        if progressed:
+            continue
+
+        if callable(read_any_blocking):
+            remaining_ms = max(1, int((deadline - time.time()) * 1000))
+            if remaining_ms <= 0:
+                break
+            res = read_any_blocking(remaining, {k: cursors.get(k) for k in remaining}, remaining_ms)
+            if res is not None:
+                blk_name, blk_msg = res
+                results[blk_name] = _process_message_for_return(blk_name, blk_msg)
+                continue
+            # No message within remaining time
+            break
+        else:
+            # Fallback polling
+            time.sleep(0.05)
+
+    if len(results) == len(names):
+        return {"ok": True, "messages": results}
+    return {"ok": False, "messages": results, "timeout_ms": timeout_ms}
 
 
 __all__ = [
