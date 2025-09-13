@@ -6,6 +6,8 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from magent2.observability import get_json_logger, get_metrics
+
 from .interface import Bus, BusMessage
 
 
@@ -28,7 +30,7 @@ class RedisBus(Bus):
     ) -> None:
         try:
             import redis
-        except Exception as exc:  # pragma: no cover - import-time error path
+        except ImportError as exc:  # pragma: no cover - import-time error path
             raise RuntimeError("redis package is required for RedisBus") from exc
 
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -174,7 +176,17 @@ class RedisBus(Bus):
                 self._redis.xack(topic, self._group, entry_id)
             except Exception:
                 # If ack fails, proceed; tests will still detect pending if it occurs
-                pass
+                logger = get_json_logger("magent2.bus")
+                logger.warning(
+                    "redis xack failed",
+                    extra={
+                        "event": "redis_xack_failed",
+                        "topic": topic,
+                        "group": str(self._group),
+                        "entry_id": entry_id,
+                    },
+                )
+                get_metrics().increment("bus_ack_failures", {"topic": topic})
         return messages
 
     def _read_blocking_without_group(
@@ -242,7 +254,18 @@ class RedisBus(Bus):
         payload_raw = data.get("payload", "{}")
         try:
             payload = json.loads(payload_raw)
-        except Exception:
+        except json.JSONDecodeError:
+            # Malformed payload JSON – fall back to empty and record a warning/metric
+            logger = get_json_logger("magent2.bus")
+            logger.warning(
+                "invalid bus payload json",
+                extra={
+                    "event": "bus_payload_invalid_json",
+                    "topic": topic,
+                    "entry_id": entry_id,
+                },
+            )
+            get_metrics().increment("bus_payload_decode_errors", {"topic": topic})
             payload = {}
 
         bus_id = data.get("id") or entry_id

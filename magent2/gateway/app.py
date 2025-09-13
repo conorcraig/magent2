@@ -158,6 +158,10 @@ def create_app(bus: Bus) -> FastAPI:
                             "agent": agent_name,
                         },
                     )
+                    metrics.increment(
+                        "gateway_bus_publish_errors",
+                        {"path": "send", "conversation_id": message.conversation_id},
+                    )
                     raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Publish a stream-visible user_message event so clients can render inbound messages
@@ -177,6 +181,14 @@ def create_app(bus: Bus) -> FastAPI:
                 "gateway send error",
                 extra={
                     "event": "gateway_error",
+                    "path": "send",
+                    "conversation_id": message.conversation_id,
+                    "stage": "stream_user_message",
+                },
+            )
+            metrics.increment(
+                "gateway_bus_publish_errors",
+                {
                     "path": "send",
                     "conversation_id": message.conversation_id,
                     "stage": "stream_user_message",
@@ -269,6 +281,7 @@ def create_app(bus: Bus) -> FastAPI:
                 "gateway not ready",
                 extra={"event": "gateway_error", "service": "gateway", "path": "ready"},
             )
+            metrics.increment("gateway_ready_errors", {})
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 
     return app

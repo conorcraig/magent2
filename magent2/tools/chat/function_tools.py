@@ -161,4 +161,5 @@ def send_message(
                 "run_id": str(ctx.get("run_id", "")),
             },
         )
+        # Re-raise so callers can handle according to their policy
         raise

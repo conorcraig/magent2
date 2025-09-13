@@ -418,7 +418,7 @@ class Worker:
                 # Ensure TTL exists (set if not present)
                 try:
                     ttl = int(client.ttl(key))
-                except Exception:
+                except (TypeError, ValueError):
                     ttl = -2
                 if ttl is None or ttl < 0:
                     client.expire(key, 60 * 60 * 24)
@@ -440,7 +440,7 @@ class Worker:
                 client.sadd(key, message_id)
                 try:
                     ttl = int(client.ttl(key))
-                except Exception:
+                except (TypeError, ValueError):
                     ttl = -2
                 if ttl is None or ttl < 0:
                     client.expire(key, 60 * 60 * 24)
