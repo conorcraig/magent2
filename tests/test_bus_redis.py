@@ -82,3 +82,48 @@ def test_redis_bus_consumer_group_ack(redis_url: str) -> None:
     pending = _pending_count_raw(client, topic, group)
     if pending >= 0:
         assert pending == 0
+
+
+def test_redis_bus_blocking_read_no_group_timeout(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    bus = RedisBus(redis_url=redis_url)
+
+    # No messages yet; blocking read should timeout and return empty list
+    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=200))
+    assert out == []
+
+
+def test_redis_bus_blocking_read_receives_new_messages(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    bus = RedisBus(redis_url=redis_url)
+
+    # Start a blocking read at the tail and publish a message; the read should return it
+    # We cannot truly run concurrently here, so we publish just before calling, but rely on
+    # XREAD with "$" to only get new messages.
+    # First, ensure the stream exists by reading non-blocking tail
+    _ = list(bus.read(topic, last_id=None, limit=1))
+
+    # Trigger a publish in-between; then call blocking read starting from tail "$"
+    mid = bus.publish(topic, BusMessage(topic=topic, payload={"n": 42}))
+    assert mid
+    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=500))
+    assert len(out) >= 1
+    assert any(m.id == mid for m in out)
+
+
+def test_redis_bus_blocking_read_with_group(redis_url: str) -> None:
+    from magent2.bus.redis_adapter import RedisBus
+
+    topic = _unique_topic()
+    group = f"g-{uuid.uuid4()}"
+    bus = RedisBus(redis_url=redis_url, group_name=group, consumer_name="c1")
+
+    mid = bus.publish(topic, BusMessage(topic=topic, payload={"n": 7}))
+    assert mid
+    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=500))
+    assert len(out) >= 1
+    assert any(m.id == mid for m in out)
