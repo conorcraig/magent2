@@ -16,37 +16,55 @@ def orchestrate_split(
     responsibilities: list[str] | None = None,
     allowed_paths: list[str] | None = None,
     wait: bool = False,
+    target_agent: str | None = None,
+    timeout_ms: int = 30000,
 ) -> dict[str, Any]:
     """Split a task across N child agents and optionally wait for completion.
 
-    - Spawns child conversations for the same agent (DevAgent) by publishing kickoff messages.
-    - Encodes responsibilities/allowed_paths/done_topic hints inline in message content.
-    - When wait=True, waits for all child "done" signals and returns the wait result.
+    - Uses structured metadata for orchestration hints
+    - Parameterizes the target agent (explicit > env > default)
+    - Allows configurable wait timeout via ``timeout_ms``
     """
     n = max(0, int(num_children))
     conv_ids: list[str] = []
     topics: list[str] = []
+
+    # Resolve target agent: explicit > ORCHESTRATE_TARGET_AGENT > AGENT_NAME > DevAgent
+    resolved_target = (
+        (target_agent or "").strip()
+        or os.getenv("ORCHESTRATE_TARGET_AGENT", "").strip()
+        or os.getenv("AGENT_NAME", "").strip()
+        or "DevAgent"
+    )
+
     for _ in range(n):
         conv = f"conv-child-{uuid.uuid4().hex[:8]}"
         topic = f"signal:{conv}:done"
         conv_ids.append(conv)
         topics.append(topic)
-        hint = (
-            " [parent: responsibilities="
-            + ",".join(list(responsibilities or []))
-            + "; allowed_paths="
-            + ",".join(list(allowed_paths or []))
-            + "; done_topic="
-            + topic
-            + "]"
+
+        metadata = {
+            "orchestrate": {
+                "responsibilities": list(responsibilities or []),
+                "allowed_paths": list(allowed_paths or []),
+                "done_topic": topic,
+            }
+        }
+
+        send_message(
+            f"agent:{resolved_target}",
+            f"Subtask for: {task}",
+            conversation_id=conv,
+            metadata=metadata,
         )
-        send_message("agent:DevAgent", f"Subtask for: {task}.{hint}", conversation_id=conv)
+
     result: dict[str, Any] = {"ok": True, "children": conv_ids, "topics": topics}
     if wait and topics:
-        res = signal_wait_all(topics, last_ids=None, timeout_ms=30000)
+        res = signal_wait_all(topics, last_ids=None, timeout_ms=int(timeout_ms))
         result["wait"] = res
         result["ok"] = bool(res.get("ok"))
     return result
+
 
 
 def _maybe_get_function_tool() -> Any | None:
