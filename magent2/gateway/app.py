@@ -188,12 +188,22 @@ def create_app(bus: Bus) -> FastAPI:
 
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+        """Server‑Sent Events stream for a conversation.
+
+        Semantics:
+        - All `token` events are forwarded as they are produced, enabling
+          real‑time incremental rendering in clients.
+        - `output` and `tool_step` events are forwarded as‑is.
+
+        Parameters:
+        - conversation_id: stream topic key (`stream:{conversation_id}`)
+        - max_events: optional testing aid to stop after N events
+        """
         topic = f"stream:{conversation_id}"
 
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
-            first_token_sent = False
             cap = _sse_cap_bytes()
             # Detect if the underlying bus supports blocking reads (e.g., Redis consumer groups)
             try:
@@ -211,18 +221,6 @@ def create_app(bus: Bus) -> FastAPI:
                 if items:
                     for m in items:
                         payload = m.payload
-                        # Filter: allow only the first token event; pass through others
-                        try:
-                            event_kind = str(payload.get("event", ""))
-                            if event_kind == "token":
-                                if first_token_sent:
-                                    # skip additional token chunks for stability
-                                    last_id = m.id
-                                    continue
-                                first_token_sent = True
-                        except Exception:
-                            # If payload is not dict-like, fall through without filtering
-                            pass
                         safe_payload = _truncate_payload_for_sse(payload, cap)
                         data = json.dumps(safe_payload, separators=(",", ":"))
                         yield f"data: {data}\n\n"
