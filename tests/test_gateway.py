@@ -170,6 +170,49 @@ async def test_gateway_stream_relays_sse_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_stream_applies_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from magent2.gateway.app import create_app
+
+    # Cap very small to force truncation
+    monkeypatch.setenv("GATEWAY_SSE_EVENT_MAX_BYTES", "32")
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    conversation_id = "conv_stream_cap"
+    stream_topic = f"stream:{conversation_id}"
+
+    # Publish a large payload event
+    big_text = "x" * 500
+    bus.publish(
+        stream_topic,
+        BusMessage(
+            topic=stream_topic,
+            payload={
+                "event": "output",
+                "conversation_id": conversation_id,
+                "text": big_text,
+            },
+        ),
+    )
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        async with client.stream("GET", f"/stream/{conversation_id}?max_events=1") as resp:
+            assert resp.status_code == 200
+            payload = None
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    payload = json.loads(line[len("data: ") :])
+                    break
+    assert payload is not None
+    # Expect a truncated summary with event preserved (or 'truncated') and a flag
+    assert payload.get("truncated") is True
+    assert payload.get("event") in {"output", "truncated"}
+
+
+@pytest.mark.asyncio
 async def test_gateway_send_emits_user_message_event_to_stream() -> None:
     from magent2.gateway.app import create_app
 

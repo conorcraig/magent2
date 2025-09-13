@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -27,6 +28,49 @@ def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
     logger = get_json_logger("magent2.gateway")
     metrics = get_metrics()
+
+    def _sse_event_cap_bytes() -> int | None:
+        raw = (os.getenv("GATEWAY_SSE_EVENT_MAX_BYTES") or "").strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+            return value if value > 0 else None
+        except Exception:
+            return None
+
+    def _serialize_with_cap(payload: Any, cap: int | None) -> tuple[str, bool, int]:
+        """Serialize payload to JSON; if over cap, return a truncated summary.
+
+        Returns: (json_string, was_truncated, original_bytes_len)
+        """
+        try:
+            data = json.dumps(payload, separators=(",", ":"))
+        except Exception:
+            # Defensive: fall back to str(payload)
+            data = json.dumps({"event": "unknown", "repr": str(payload)})
+        original_len = len(data.encode("utf-8"))
+        if cap is None or original_len <= cap:
+            return data, False, original_len
+
+        # Build a concise, valid JSON summary that preserves the event kind
+        event_kind = ""
+        if isinstance(payload, dict):
+            try:
+                event_kind = str(payload.get("event", ""))
+            except Exception:
+                event_kind = ""
+        summary = {
+            "event": event_kind or "truncated",
+            "truncated": True,
+            "payload_len": original_len,
+        }
+        summary_json = json.dumps(summary, separators=(",", ":"))
+        # Ensure summary itself respects cap; if not, drop optional fields
+        if len(summary_json.encode("utf-8")) > (cap or 0):
+            summary_min = {"event": event_kind or "truncated", "truncated": True}
+            summary_json = json.dumps(summary_min, separators=(",", ":"))
+        return summary_json, True, original_len
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
@@ -107,6 +151,7 @@ def create_app(bus: Bus) -> FastAPI:
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:
         topic = f"stream:{conversation_id}"
+        cap = _sse_event_cap_bytes()
 
         async def event_gen() -> Any:
             last_id: str | None = None
@@ -132,8 +177,21 @@ def create_app(bus: Bus) -> FastAPI:
                         except Exception:
                             # If payload is not dict-like, fall through without filtering
                             pass
-                        data = json.dumps(payload)
-                        yield f"data: {data}\n\n"
+                        json_text, was_truncated, orig_len = _serialize_with_cap(payload, cap)
+                        if was_truncated:
+                            # Record truncation for observability
+                            logger.info(
+                                "sse payload truncated",
+                                extra={
+                                    "event": "gateway_sse_truncated",
+                                    "conversation_id": conversation_id,
+                                    "payload_len": orig_len,
+                                },
+                            )
+                            metrics.increment(
+                                "gateway_sse_truncated", {"conversation_id": conversation_id}
+                            )
+                        yield f"data: {json_text}\n\n"
                         last_id = m.id
                         sent += 1
                         if max_events is not None and sent >= max_events:
