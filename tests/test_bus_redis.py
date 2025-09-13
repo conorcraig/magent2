@@ -101,18 +101,16 @@ def test_redis_bus_blocking_read_receives_new_messages(redis_url: str) -> None:
     topic = _unique_topic()
     bus = RedisBus(redis_url=redis_url)
 
-    # Start a blocking read at the tail and publish a message; the read should return it
-    # We cannot truly run concurrently here, so we publish just before calling, but rely on
-    # XREAD with "$" to only get new messages.
-    # First, ensure the stream exists by reading non-blocking tail
-    _ = list(bus.read(topic, last_id=None, limit=1))
-
-    # Trigger a publish in-between; then call blocking read starting from tail "$"
-    mid = bus.publish(topic, BusMessage(topic=topic, payload={"n": 42}))
-    assert mid
-    out = list(bus.read_blocking(topic, last_id=None, limit=10, block_ms=500))
+    # Publish a baseline message to establish a cursor
+    baseline_id = bus.publish(topic, BusMessage(topic=topic, payload={"n": 1}))
+    assert baseline_id
+    # Publish the next message we expect to read via blocking API
+    target_id = bus.publish(topic, BusMessage(topic=topic, payload={"n": 42}))
+    assert target_id
+    # Use read_blocking with last_id set to the baseline message id; should return the target
+    out = list(bus.read_blocking(topic, last_id=baseline_id, limit=10, block_ms=500))
     assert len(out) >= 1
-    assert any(m.id == mid for m in out)
+    assert any(m.id == target_id for m in out)
 
 
 def test_redis_bus_blocking_read_with_group(redis_url: str) -> None:
