@@ -156,8 +156,8 @@ class MCPClient:
                 message = _read_frame(self._stdout)
             except EOFError:
                 break
-            except FramingError:
-                # framing errors: stop reader
+            except (FramingError, OSError):
+                # Framing or I/O errors: stop reader gracefully
                 break
             # Handle JSON-RPC response
             msg_id = message.get("id")
