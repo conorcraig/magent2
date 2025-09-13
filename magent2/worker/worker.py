@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+
+import os
 import random
 import time
 import traceback
+
 import uuid
 from collections.abc import Iterable
 from typing import Any, Protocol
@@ -124,6 +127,27 @@ class Worker:
                         stream_topic,
                         BusMessage(topic=stream_topic, payload=payload),
                     )
+                # Optional child auto-complete behavior:
+                # if message carries a done_topic hint and the env gate is enabled,
+                # emit a done signal.
+                try:
+                    auto_gate = os.getenv("AUTO_CHILD_SIGNAL_DONE", "0").strip() == "1"
+                    if not auto_gate:
+                        return
+
+                    meta = envelope.metadata or {}
+                    orch = meta.get("orchestrate") if isinstance(meta, dict) else None
+                    topic = (
+                        orch.get("done_topic") if isinstance(orch, dict) else None
+                    )
+                    if isinstance(topic, str):
+                        topic = topic.strip()
+                    if isinstance(topic, str) and topic.startswith("signal:") and len(topic) <= 256:
+                        from magent2.tools.signals.impl import send_signal
+
+                        send_signal(topic, {"ok": True})
+                except Exception:
+                    pass
             except Exception:
                 errored = True
                 logger.exception(

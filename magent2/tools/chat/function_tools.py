@@ -64,7 +64,7 @@ def _resolve_conversation_id(
 
 
 def _build_envelope(
-    conversation_id: str, sender: str, recipient: str, content: str
+    conversation_id: str, sender: str, recipient: str, content: str, metadata: dict[str, Any] | None
 ) -> MessageEnvelope:
     return MessageEnvelope(
         conversation_id=conversation_id,
@@ -72,7 +72,7 @@ def _build_envelope(
         recipient=recipient,
         type="message",
         content=content,
-        metadata={},
+        metadata=dict(metadata or {}),
     )
 
 
@@ -100,6 +100,7 @@ def send_message(
     *,
     conversation_id: str | None = None,
     context: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     logger = get_json_logger("magent2.tools")
     metrics = get_metrics()
@@ -113,7 +114,7 @@ def send_message(
 
     cid = _resolve_conversation_id(rec, context, conversation_id)
     sender = _resolve_sender()
-    env = _build_envelope(cid, sender, rec, text)
+    env = _build_envelope(cid, sender, rec, text, metadata)
 
     bus = _get_bus()
     logger.info(
