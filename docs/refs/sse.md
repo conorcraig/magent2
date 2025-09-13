@@ -33,9 +33,8 @@ es.onmessage = (e) => console.log(JSON.parse(e.data));
 ## Gateway SSE semantics
 
 - Token events:
-  - The gateway forwards only the first `token` event per assistant turn and suppresses subsequent token chunks.
-  - Rationale: reduce UI flicker/noise and avoid duplicating partial text while still signalling that generation has begun.
-  - Clients MUST treat the `token` event as an optional early signal, not as a reliable incremental transcript.
+  - The gateway forwards all `token` events in order as they are produced to enable real‑time incremental rendering.
+  - Clients may render tokens incrementally; the final `output` still contains the complete text.
 - Output event:
   - The complete assistant text is delivered via a single `output` event at the end of the turn.
   - Clients SHOULD render final text from `output.text`.
@@ -44,7 +43,6 @@ es.onmessage = (e) => console.log(JSON.parse(e.data));
 
 Notes:
 
-- Aggregated previews (periodic concatenation of token chunks) may be introduced later; until then, only the first token is forwarded and the final `output` contains the full text.
 - The `max_events` query parameter on `/stream/{conversation_id}` is intended for testing/tools and not a stability guarantee for public clients.
 
 ## References

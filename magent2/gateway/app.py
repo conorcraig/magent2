@@ -109,11 +109,9 @@ def create_app(bus: Bus) -> FastAPI:
         """Server‑Sent Events stream for a conversation.
 
         Semantics:
-        - For `token` events, only the FIRST token of an assistant turn is
-          forwarded. Subsequent token chunks are suppressed.
-          Rationale: reduce flicker/noise while signalling that generation
-          began. Final text arrives via `output`.
-        - `output` and `tool_step` events are forwarded as-is.
+        - All `token` events are forwarded as they are produced, enabling
+          real‑time incremental rendering in clients.
+        - `output` and `tool_step` events are forwarded as‑is.
 
         Parameters:
         - conversation_id: stream topic key (`stream:{conversation_id}`)
@@ -124,7 +122,6 @@ def create_app(bus: Bus) -> FastAPI:
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
-            first_token_sent = False
             # Simple polling loop over Bus.read
             while True:
                 items = await asyncio.to_thread(
@@ -133,18 +130,6 @@ def create_app(bus: Bus) -> FastAPI:
                 if items:
                     for m in items:
                         payload = m.payload
-                        # Filter: allow only the first token event; pass through others
-                        try:
-                            event_kind = str(payload.get("event", ""))
-                            if event_kind == "token":
-                                if first_token_sent:
-                                    # skip additional token chunks for stability
-                                    last_id = m.id
-                                    continue
-                                first_token_sent = True
-                        except Exception:
-                            # If payload is not dict-like, fall through without filtering
-                            pass
                         data = json.dumps(payload)
                         yield f"data: {data}\n\n"
                         last_id = m.id
