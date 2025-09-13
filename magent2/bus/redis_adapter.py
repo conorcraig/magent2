@@ -45,6 +45,14 @@ class RedisBus(Bus):
     # ----------------------------
     # Public API
     # ----------------------------
+    def get_client(self) -> Any:
+        """Return the underlying Redis client object.
+
+        Exposed for advanced use cases such as idempotency sets or short-lived
+        locks that are orthogonal to the Bus publish/read semantics.
+        """
+        return self._redis
+
     def publish(self, topic: str, message: BusMessage) -> str:  # noqa: D401
         """Append one message to a topic. Returns the Bus message id (uuid)."""
         # Store canonical id and payload JSON in the stream entry
