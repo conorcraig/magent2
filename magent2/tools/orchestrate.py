@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import os
 import uuid
 from typing import Any
-
-import os
 
 from magent2.tools.chat.function_tools import send_message
 from magent2.tools.signals.wrappers import signal_wait_all
