@@ -16,7 +16,7 @@ def test_json_logger_redacts_and_formats(capsys: Any) -> None:
     logger.info(
         "hello",
         extra={
-            "metadata": {
+            "attributes": {
                 "OPENAI_API_KEY": "sk-abc",
                 "token": "XYZ",
                 "safe": "ok",
@@ -28,14 +28,13 @@ def test_json_logger_redacts_and_formats(capsys: Any) -> None:
     lines = _parse_json_lines(out)
     assert len(lines) == 1
     rec = lines[0]
-    assert rec["message"] == "hello"
+    assert rec["msg"] == "hello"
     assert rec["level"] == "info"
-    assert rec["logger"] == "obs-test"
-    md = rec.get("metadata")
-    assert isinstance(md, dict)
-    assert md["safe"] == "ok"
-    assert md["OPENAI_API_KEY"] == "[REDACTED]"
-    assert md["token"] == "[REDACTED]"
+    attributes = rec.get("attributes")
+    assert isinstance(attributes, dict)
+    assert attributes["safe"] == "ok"
+    assert attributes["OPENAI_API_KEY"] == "[REDACTED]"
+    assert attributes["token"] == "[REDACTED]"
 
 
 def test_tracer_spans_and_parent_child(capsys: Any) -> None:

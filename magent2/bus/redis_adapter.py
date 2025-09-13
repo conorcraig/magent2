@@ -47,6 +47,14 @@ class RedisBus(Bus):
     # ----------------------------
     # Public API
     # ----------------------------
+    def get_client(self) -> Any:
+        """Return the underlying Redis client object.
+
+        Exposed for advanced use cases such as idempotency sets or short-lived
+        locks that are orthogonal to the Bus publish/read semantics.
+        """
+        return self._redis
+
     def publish(self, topic: str, message: BusMessage) -> str:  # noqa: D401
         """Append one message to a topic. Returns the Bus message id (uuid)."""
         # Store canonical id and payload JSON in the stream entry
@@ -68,6 +76,18 @@ class RedisBus(Bus):
         if self._group:
             return list(self._read_with_group(topic, limit))
         return list(self._read_without_group(topic, last_id, limit))
+
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:  # noqa: D401
+        """Block up to block_ms waiting for messages after last_id."""
+        if self._group:
+            return list(self._read_blocking_with_group(topic, limit, block_ms))
+        return list(self._read_blocking_without_group(topic, last_id, limit, block_ms))
 
     # ----------------------------
     # Internal helpers
@@ -167,6 +187,52 @@ class RedisBus(Bus):
                     },
                 )
                 get_metrics().increment("bus_ack_failures", {"topic": topic})
+        return messages
+
+    def _read_blocking_without_group(
+        self, topic: str, last_id: str | None, limit: int, block_ms: int
+    ) -> Iterable[BusMessage]:
+        # Determine the starting id for XREAD
+        if last_id is None:
+            start_id = "$"  # only new messages
+        elif self._is_entry_id(last_id):
+            start_id = last_id
+        else:
+            # Try to resolve uuid to an entry id; if not found, tail from current end
+            resolved = self._scan_for_uuid(topic, last_id, max(limit * 2, 100))
+            start_id = resolved if resolved is not None else "$"
+
+        resp = self._redis.xread(streams={topic: start_id}, count=limit, block=block_ms) or []
+        if not resp:
+            return []
+        # resp shape: [(stream, [(entry_id, {field: value, ...}), ...])]
+        _, items = resp[0]
+        return [self._to_bus_message(topic, data, entry_id) for entry_id, data in items]
+
+    def _read_blocking_with_group(
+        self, topic: str, limit: int, block_ms: int
+    ) -> Iterable[BusMessage]:
+        self._ensure_group(topic)
+
+        resp = self._redis.xreadgroup(
+            groupname=self._group,
+            consumername=self._consumer,
+            streams={topic: ">"},
+            count=limit,
+            block=block_ms,
+        )
+
+        if not resp:
+            return []
+
+        _, items = resp[0]
+        messages: list[BusMessage] = []
+        for entry_id, data in items:
+            messages.append(self._to_bus_message(topic, data, entry_id))
+            try:
+                self._redis.xack(topic, self._group, entry_id)
+            except Exception:
+                pass
         return messages
 
     def _ensure_group(self, topic: str) -> None:

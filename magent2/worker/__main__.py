@@ -132,16 +132,21 @@ def build_runner_from_env() -> Runner:
             "runner selected",
             extra={
                 "event": "runner_selected",
-                "runner": "OpenAI",
+                "service": "worker",
                 "agent": cfg.agent_name,
                 "model": cfg.model,
-                "metadata": {"tools": tool_names},
+                "attributes": {"tools": tool_names},
             },
         )
         return OpenAIAgentsRunner(agent)
     get_json_logger("magent2").info(
         "runner selected",
-        extra={"event": "runner_selected", "runner": "Echo", "agent": cfg.agent_name},
+        extra={
+            "event": "runner_selected",
+            "service": "worker",
+            "runner": "Echo",
+            "agent": cfg.agent_name,
+        },
     )
     return EchoRunner()
 
