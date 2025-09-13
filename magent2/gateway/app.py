@@ -106,6 +106,19 @@ def create_app(bus: Bus) -> FastAPI:
 
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+        """Server‑Sent Events stream for a conversation.
+
+        Semantics:
+        - For `token` events, only the FIRST token of an assistant turn is
+          forwarded. Subsequent token chunks are suppressed.
+          Rationale: reduce flicker/noise while signalling that generation
+          began. Final text arrives via `output`.
+        - `output` and `tool_step` events are forwarded as-is.
+
+        Parameters:
+        - conversation_id: stream topic key (`stream:{conversation_id}`)
+        - max_events: optional testing aid to stop after N events
+        """
         topic = f"stream:{conversation_id}"
 
         async def event_gen() -> Any:
