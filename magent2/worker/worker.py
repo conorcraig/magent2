@@ -98,82 +98,29 @@ class Worker:
         stream_topic = f"stream:{envelope.conversation_id}"
 
         with use_run_context(run_id, envelope.conversation_id, self._agent_name):
-            logger.info(
-                "run started",
-                extra={
-                    "event": "run_started",
-                    "run_id": run_id,
-                    "conversation_id": envelope.conversation_id,
-                    "agent": self._agent_name,
-                },
-            )
-            metrics.increment(
-                "runs_started",
-                {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
-            )
-            errored = False
+            self._log_run_started(logger, run_id, envelope.conversation_id)
+            self._inc_runs_started(metrics, envelope.conversation_id)
+
             # Track tool call/error counters for this run (best-effort via Metrics snapshot)
             snap_before = metrics.snapshot()
-            tool_calls_before = len([e for e in snap_before if e.get("name") == "tool_calls"]) 
-            tool_errors_before = len([e for e in snap_before if e.get("name") == "tool_errors"]) 
+            tool_calls_before = len([e for e in snap_before if e.get("name") == "tool_calls"])
+            tool_errors_before = len([e for e in snap_before if e.get("name") == "tool_errors"])
             try:
                 for event in self._runner.stream_run(envelope):
-                    if isinstance(event, BaseStreamEvent):
-                        # JSON mode ensures datetimes and other types are serialized safely
-                        payload: dict[str, Any] = event.model_dump(mode="json")
-                    else:
-                        # The runner protocol guarantees dict[str, Any] for non-BaseStreamEvent
-                        payload = event
-                    self._bus.publish(
-                        stream_topic,
-                        BusMessage(topic=stream_topic, payload=payload),
-                    )
+                    self._publish_stream_event(stream_topic, event)
             except Exception:
-                errored = True
-                logger.exception(
-                    "run errored",
-                    extra={
-                        "event": "run_errored",
-                        "run_id": run_id,
-                        "conversation_id": envelope.conversation_id,
-                        "agent": self._agent_name,
-                    },
-                )
-                metrics.increment(
-                    "runs_errored",
-                    {"agent": self._agent_name, "conversation_id": envelope.conversation_id},
-                )
+                self._log_run_errored(logger, run_id, envelope.conversation_id)
+                self._inc_runs_errored(metrics, envelope.conversation_id)
                 # Re-raise so the retry/DLQ policy can handle terminal failures
                 raise
-            finally:
-                if not errored:
-                    # Compute delta counts since run start
-                    snap_after = metrics.snapshot()
-                    tool_calls_after = len(
-                        [e for e in snap_after if e.get("name") == "tool_calls"]
-                    )
-                    tool_errors_after = len(
-                        [e for e in snap_after if e.get("name") == "tool_errors"]
-                    )
-                    run_tool_calls = max(0, tool_calls_after - tool_calls_before)
-                    run_tool_errors = max(0, tool_errors_after - tool_errors_before)
-                    logger.info(
-                        "run completed",
-                        extra={
-                            "event": "run_completed",
-                            "run_id": run_id,
-                            "conversation_id": envelope.conversation_id,
-                            "agent": self._agent_name,
-                            "kv": {"tool_calls": run_tool_calls, "tool_errors": run_tool_errors},
-                        },
-                    )
-                    metrics.increment(
-                        "runs_completed",
-                        {
-                            "agent": self._agent_name,
-                            "conversation_id": envelope.conversation_id,
-                        },
-                    )
+            else:
+                calls_after, errs_after = self._compute_tool_counts(metrics)
+                run_tool_calls = max(0, calls_after - tool_calls_before)
+                run_tool_errors = max(0, errs_after - tool_errors_before)
+                self._log_run_completed(
+                    logger, run_id, envelope.conversation_id, run_tool_calls, run_tool_errors
+                )
+                self._inc_runs_completed(metrics, envelope.conversation_id)
 
     # --- Enhancements for robustness (Issue #38) ---
     def _run_and_stream_with_retry(self, envelope: MessageEnvelope) -> bool:
@@ -199,6 +146,76 @@ class Worker:
 
         # Should not reach here
         return False
+
+    # ----- helpers to reduce complexity in _run_and_stream -----
+    def _publish_stream_event(
+        self, stream_topic: str, event: BaseStreamEvent | dict[str, Any]
+    ) -> None:
+        if isinstance(event, BaseStreamEvent):
+            payload: dict[str, Any] = event.model_dump(mode="json")
+        else:
+            payload = event
+        self._bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=payload))
+
+    def _compute_tool_counts(self, metrics: Any) -> tuple[int, int]:
+        snap = metrics.snapshot()
+        calls = len([e for e in snap if e.get("name") == "tool_calls"])
+        errs = len([e for e in snap if e.get("name") == "tool_errors"])
+        return calls, errs
+
+    def _log_run_started(self, logger: Any, run_id: str, conversation_id: str) -> None:
+        logger.info(
+            "run started",
+            extra={
+                "event": "run_started",
+                "run_id": run_id,
+                "conversation_id": conversation_id,
+                "agent": self._agent_name,
+            },
+        )
+
+    def _inc_runs_started(self, metrics: Any, conversation_id: str) -> None:
+        metrics.increment(
+            "runs_started",
+            {"agent": self._agent_name, "conversation_id": conversation_id},
+        )
+
+    def _log_run_errored(self, logger: Any, run_id: str, conversation_id: str) -> None:
+        logger.exception(
+            "run errored",
+            extra={
+                "event": "run_errored",
+                "run_id": run_id,
+                "conversation_id": conversation_id,
+                "agent": self._agent_name,
+            },
+        )
+
+    def _inc_runs_errored(self, metrics: Any, conversation_id: str) -> None:
+        metrics.increment(
+            "runs_errored",
+            {"agent": self._agent_name, "conversation_id": conversation_id},
+        )
+
+    def _log_run_completed(
+        self, logger: Any, run_id: str, conversation_id: str, tool_calls: int, tool_errors: int
+    ) -> None:
+        logger.info(
+            "run completed",
+            extra={
+                "event": "run_completed",
+                "run_id": run_id,
+                "conversation_id": conversation_id,
+                "agent": self._agent_name,
+                "kv": {"tool_calls": tool_calls, "tool_errors": tool_errors},
+            },
+        )
+
+    def _inc_runs_completed(self, metrics: Any, conversation_id: str) -> None:
+        metrics.increment(
+            "runs_completed",
+            {"agent": self._agent_name, "conversation_id": conversation_id},
+        )
 
     def _publish_to_dlq(self, envelope: MessageEnvelope) -> None:
         """Publish the failed envelope to a dead-letter queue topic.
