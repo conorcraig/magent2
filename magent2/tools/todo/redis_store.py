@@ -80,7 +80,7 @@ class RedisTodoStore(TodoStore):
         try:
             data = json.loads(raw.decode("utf-8"))
             return Task.model_validate(data)
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
             return None
 
     def list_tasks(self, conversation_id: str) -> list[Task]:

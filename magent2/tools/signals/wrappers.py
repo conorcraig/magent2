@@ -43,6 +43,7 @@ def signal_send(topic: str, payload: dict[str, Any] | None = None) -> dict[str, 
             "tool_errors",
             {"tool": "signals", "conversation_id": str(ctx.get("conversation_id", ""))},
         )
+        # Re-raise so callers can handle explicit failures
         raise
 
 

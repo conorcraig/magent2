@@ -68,6 +68,10 @@ def create_app(bus: Bus) -> FastAPI:
                             "agent": agent_name,
                         },
                     )
+                    metrics.increment(
+                        "gateway_bus_publish_errors",
+                        {"path": "send", "conversation_id": message.conversation_id},
+                    )
                     raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Publish a stream-visible user_message event so clients can render inbound messages
@@ -87,6 +91,14 @@ def create_app(bus: Bus) -> FastAPI:
                 "gateway send error",
                 extra={
                     "event": "gateway_error",
+                    "path": "send",
+                    "conversation_id": message.conversation_id,
+                    "stage": "stream_user_message",
+                },
+            )
+            metrics.increment(
+                "gateway_bus_publish_errors",
+                {
                     "path": "send",
                     "conversation_id": message.conversation_id,
                     "stage": "stream_user_message",
@@ -121,7 +133,7 @@ def create_app(bus: Bus) -> FastAPI:
                     for m in items:
                         payload = m.payload
                         # Filter: allow only the first token event; pass through others
-                        try:
+                        if isinstance(payload, dict):
                             event_kind = str(payload.get("event", ""))
                             if event_kind == "token":
                                 if first_token_sent:
@@ -129,9 +141,6 @@ def create_app(bus: Bus) -> FastAPI:
                                     last_id = m.id
                                     continue
                                 first_token_sent = True
-                        except Exception:
-                            # If payload is not dict-like, fall through without filtering
-                            pass
                         data = json.dumps(payload)
                         yield f"data: {data}\n\n"
                         last_id = m.id
@@ -160,6 +169,7 @@ def create_app(bus: Bus) -> FastAPI:
                 "gateway not ready",
                 extra={"event": "gateway_error", "path": "ready"},
             )
+            metrics.increment("gateway_ready_errors", {})
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 
     return app

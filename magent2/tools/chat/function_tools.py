@@ -143,4 +143,5 @@ def send_message(
         metrics.increment(
             "tool_errors", {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))}
         )
+        # Re-raise so callers can handle according to their policy
         raise

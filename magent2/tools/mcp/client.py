@@ -36,13 +36,13 @@ def _read_frame(stdout: IO[bytes]) -> dict[str, Any]:
         raise EOFError("EOF while reading header line")
     try:
         header_decoded = header_line.decode().strip()
-    except Exception as exc:  # pragma: no cover - defensive
+    except UnicodeDecodeError as exc:  # pragma: no cover - defensive
         raise FramingError("Failed to decode header line") from exc
     if not header_decoded.lower().startswith("content-length:"):
         raise FramingError("Missing Content-Length header")
     try:
         length = int(header_decoded.split(":", 1)[1].strip())
-    except Exception as exc:  # pragma: no cover - defensive
+    except ValueError as exc:  # pragma: no cover - defensive
         raise FramingError("Invalid Content-Length header") from exc
 
     # Expect empty line after headers
@@ -55,7 +55,7 @@ def _read_frame(stdout: IO[bytes]) -> dict[str, Any]:
         raise FramingError("Truncated body")
     try:
         return json.loads(body.decode())
-    except Exception as exc:  # pragma: no cover - defensive
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise FramingError("Invalid JSON body") from exc
 
 
@@ -156,7 +156,7 @@ class MCPClient:
                 message = _read_frame(self._stdout)
             except EOFError:
                 break
-            except Exception:
+            except FramingError:
                 # framing errors: stop reader
                 break
             # Handle JSON-RPC response
