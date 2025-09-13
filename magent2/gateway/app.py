@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
-from magent2.observability import get_json_logger, get_metrics
+from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
 
 
 # ----------------------------
@@ -99,6 +99,8 @@ class SendRequest(BaseModel):
 
 def create_app(bus: Bus) -> FastAPI:
     app = FastAPI()
+    # Configure uvicorn logging at app startup to avoid import-time side effects
+    configure_uvicorn_logging()
     logger = get_json_logger("magent2.gateway")
     metrics = get_metrics()
 
@@ -172,7 +174,13 @@ def create_app(bus: Bus) -> FastAPI:
             "gateway send",
             extra={
                 "event": "gateway_send",
+                "service": "gateway",
                 "conversation_id": message.conversation_id,
+                "attributes": {
+                    "sender": message.sender,
+                    "recipient": message.recipient,
+                    "content_len": len(message.content or ""),
+                },
             },
         )
         metrics.increment("gateway_sends", {"conversation_id": message.conversation_id})
@@ -229,7 +237,11 @@ def create_app(bus: Bus) -> FastAPI:
 
         logger.info(
             "gateway stream start",
-            extra={"event": "gateway_stream", "conversation_id": conversation_id},
+            extra={
+                "event": "gateway_stream",
+                "service": "gateway",
+                "conversation_id": conversation_id,
+            },
         )
         metrics.increment("gateway_streams", {"conversation_id": conversation_id})
         return StreamingResponse(event_gen(), media_type="text/event-stream")
@@ -243,7 +255,7 @@ def create_app(bus: Bus) -> FastAPI:
         except Exception as exc:  # pragma: no cover - error path mapping
             logger.error(
                 "gateway not ready",
-                extra={"event": "gateway_error", "path": "ready"},
+                extra={"event": "gateway_error", "service": "gateway", "path": "ready"},
             )
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 

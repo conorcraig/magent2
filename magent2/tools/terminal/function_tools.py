@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -128,12 +129,13 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
     )
 
     try:
+        start_ns = time.perf_counter_ns()
         logger.info(
             "tool call",
             extra={
                 "event": "tool_call",
                 "tool": "terminal.run",
-                "metadata": {
+                "attributes": {
                     "cwd": cwd or "",
                     "command": command.split(" ")[0] if command else "",
                 },
@@ -158,6 +160,21 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             f"timeout={_b(result.get('timeout'))} "
             f"truncated={_b(result.get('truncated'))}"
         )
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
+                "attributes": {
+                    "exit": result.get("exit_code"),
+                    "timeout": bool(result.get("timeout")),
+                    "truncated": bool(result.get("truncated")),
+                    "duration_ms": duration_ms,
+                    "output_len": len(concise),
+                },
+            },
+        )
         return f"{status}\noutput:\n{concise}"
     except Exception as exc:  # noqa: BLE001
         # Convert exceptions into a concise, redacted failure string
@@ -168,7 +185,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             extra={
                 "event": "tool_error",
                 "tool": "terminal.run",
-                "metadata": {"error": concise_err[:200]},
+                "attributes": {"error": concise_err[:200]},
             },
         )
         metrics.increment(
