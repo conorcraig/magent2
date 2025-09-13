@@ -16,44 +16,11 @@ from magent2.observability import (
     reset_metrics,
     use_run_context,
 )
+from tests.helpers.bus import InMemoryBus
 
 
 def _parse_json_lines(output: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in output.strip().splitlines() if line.strip()]
-
-
-class _InMemoryBus(Bus):
-    def __init__(self) -> None:
-        self._topics: dict[str, list[BusMessage]] = {}
-
-    def publish(self, topic: str, message: BusMessage) -> str:
-        self._topics.setdefault(topic, []).append(message)
-        return message.id
-
-    def read(
-        self,
-        topic: str,
-        last_id: str | None = None,
-        limit: int = 100,
-    ) -> Iterable[BusMessage]:
-        items = self._topics.get(topic, [])
-        if last_id is None:
-            return list(items[-limit:])
-        start = 0
-        for i, m in enumerate(items):
-            if m.id == last_id:
-                start = i + 1
-                break
-        return list(items[start : start + limit])
-
-    def read_blocking(
-        self,
-        topic: str,
-        last_id: str | None = None,
-        limit: int = 100,
-        block_ms: int = 1000,
-    ) -> Iterable[BusMessage]:
-        return self.read(topic, last_id=last_id, limit=limit)
 
 
 @dataclass(slots=True)
@@ -88,7 +55,7 @@ def test_worker_logs_include_ids_and_counters_increment(capsys: Any) -> None:
     logger = get_json_logger("magent2")
     logger.setLevel(20)
 
-    bus = _InMemoryBus()
+    bus = InMemoryBus()
     env = MessageEnvelope(
         conversation_id="conv_obs",
         sender="user:alice",
@@ -205,7 +172,7 @@ def test_chat_tool_logs_include_ids_and_tool_counters(
     # Use in-memory bus for chat tool
     from magent2.tools.chat.function_tools import send_message, set_bus_for_testing
 
-    bus = _InMemoryBus()
+    bus = InMemoryBus()
     set_bus_for_testing(bus)
 
     run_id = str(uuid.uuid4())

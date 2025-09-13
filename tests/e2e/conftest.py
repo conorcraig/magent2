@@ -1,3 +1,5 @@
+# e2e conftest for shared fixtures (reserved)
+
 from __future__ import annotations
 
 import os

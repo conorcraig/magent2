@@ -25,17 +25,17 @@ def _redact_value(value: Any) -> Any:
     return "[REDACTED]"
 
 
-def _redact(obj: Any) -> Any:
+def redact(obj: Any) -> Any:
     if isinstance(obj, Mapping):
         redacted: dict[str, Any] = {}
         for k, v in obj.items():
             if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
                 redacted[k] = _redact_value(v)
             else:
-                redacted[k] = _redact(v)
+                redacted[k] = redact(v)
         return redacted
     if isinstance(obj, list | tuple):
-        return [_redact(v) for v in obj]
+        return [redact(v) for v in obj]
     return obj
 
 
@@ -90,7 +90,7 @@ def _enrich_with_context(payload: dict[str, Any]) -> None:
 def _redact_attributes_in_payload(payload: dict[str, Any]) -> None:
     attributes = payload.get("attributes")
     if isinstance(attributes, dict):
-        payload["attributes"] = _redact(attributes)
+        payload["attributes"] = redact(attributes)
 
 
 class JsonLogFormatter(logging.Formatter):

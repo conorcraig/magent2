@@ -86,6 +86,13 @@ class OpenAIAgentsRunner:
     # ----------------------------
     # Internal helpers
     # ----------------------------
+    @staticmethod
+    def _try_put(queue: Queue[BaseStreamEvent | dict[str, Any] | None], item: BaseStreamEvent | dict[str, Any] | None) -> None:
+        try:
+            queue.put_nowait(item)
+        except Full:
+            pass
+
     def _get_session(self, conversation_id: str) -> Any:
         # Simple LRU: move to end on access, evict from left when over limit
         if conversation_id in self._sessions:
@@ -210,22 +217,13 @@ class OpenAIAgentsRunner:
     ) -> tuple[int, bool]:
         if isinstance(mapped, TokenEvent):
             accumulated_text_parts.append(mapped.text)
-            try:
-                queue.put_nowait(mapped)
-            except Full:
-                pass
+            OpenAIAgentsRunner._try_put(queue, mapped)
             return 1, False
         if isinstance(mapped, ToolStepEvent):
-            try:
-                queue.put_nowait(mapped)
-            except Full:
-                pass
+            OpenAIAgentsRunner._try_put(queue, mapped)
             return 0, False
         if isinstance(mapped, OutputEvent):
-            try:
-                queue.put_nowait(mapped)
-            except Full:
-                pass
+            OpenAIAgentsRunner._try_put(queue, mapped)
             return 0, True
         return 0, False
 
@@ -236,10 +234,7 @@ class OpenAIAgentsRunner:
         accumulated_text_parts: list[str],
     ) -> None:
         final_text = "".join(accumulated_text_parts)
-        try:
-            queue.put_nowait(OutputEvent(conversation_id=conversation_id, text=final_text))
-        except Full:
-            pass
+        OpenAIAgentsRunner._try_put(queue, OutputEvent(conversation_id=conversation_id, text=final_text))
 
     # Note: log emission to stream is intentionally omitted to keep event order stable for tests.
 
@@ -273,39 +268,6 @@ class OpenAIAgentsRunner:
         final_output = self._map_final_output_event(conversation_id, item)
         if final_output is not None:
             return final_output
-        return None
-
-    @staticmethod
-    def _map_tool_invocation(conversation_id: str, name: Any, args: Any) -> ToolStepEvent | None:
-        if isinstance(name, str) and name and isinstance(args, dict | list):
-            return ToolStepEvent(
-                conversation_id=conversation_id,
-                name=name,
-                args=OpenAIAgentsRunner._normalize_args(args),
-            )
-        return None
-
-    @staticmethod
-    def _map_tool_result(conversation_id: str, name: Any, result: Any) -> ToolStepEvent | None:
-        if isinstance(name, str) and name and result is not None:
-            return ToolStepEvent(
-                conversation_id=conversation_id,
-                name=name,
-                args={},
-                result_summary=OpenAIAgentsRunner._summarize(result),
-            )
-        return None
-
-    def _map_final_output_event(self, conversation_id: str, item: Any) -> OutputEvent | None:
-        if not self._is_final_item(item):
-            return None
-        text_value = self._extract_text(item)
-        if isinstance(text_value, str) and text_value:
-            return OutputEvent(
-                conversation_id=conversation_id,
-                text=text_value,
-                usage=self._extract_usage(item),
-            )
         return None
 
     @staticmethod

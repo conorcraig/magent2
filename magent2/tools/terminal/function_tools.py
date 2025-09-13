@@ -233,21 +233,14 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         concise = combined[: policy.function_output_max_chars]
 
         status = _format_status(result)
-        # Success log for observability
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        # Single success log with both metadata and attributes
         logger.info(
             "tool success",
             extra={
                 "event": "tool_success",
                 "tool": "terminal.run",
                 "metadata": _success_metadata(cwd, command, result),
-            },
-        )
-        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-        logger.info(
-            "tool success",
-            extra={
-                "event": "tool_success",
-                "tool": "terminal.run",
                 "attributes": {
                     "exit": result.get("exit_code"),
                     "timeout": bool(result.get("timeout")),
