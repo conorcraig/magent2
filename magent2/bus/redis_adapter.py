@@ -70,7 +70,9 @@ class RedisBus(Bus):
     # ----------------------------
     # Blocking helpers (optional API used by signals)
     # ----------------------------
-    def read_blocking_one(self, topic: str, last_id: str | None, block_ms: int) -> BusMessage | None:
+    def read_blocking_one(
+        self, topic: str, last_id: str | None, block_ms: int
+    ) -> BusMessage | None:
         """Block up to block_ms waiting for one new message after last_id.
 
         This uses XREAD with a block to await new entries when last_id is None or
