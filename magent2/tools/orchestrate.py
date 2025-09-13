@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from magent2.tools.chat.function_tools import send_message
+from magent2.tools.signals.wrappers import signal_wait_all
 
 
 def _resolve_target_agent(target_agent: str | None) -> str:
@@ -55,7 +56,7 @@ def orchestrate_split(
 ) -> dict[str, Any]:
     """Split a task across N child agents and return child conversation info.
 
-    Note: This implementation does not block on completion even if `wait=True`.
+    Note: If `wait=True`, this will wait for all child done signals or until `timeout_ms`.
     """
     n = max(0, int(num_children))
     conv_ids: list[str] = []
@@ -73,6 +74,12 @@ def orchestrate_split(
         topics.append(topic)
         meta = _build_metadata(topic, responsibilities, allowed_paths)
         _dispatch_subtask(send_message_fn, resolved_target, task, conv, meta)
+
+    if wait and topics:
+        # Best-effort wait for children to emit their done signals
+        signal_wait_all_fn = cast(Callable[..., Any], signal_wait_all)
+        summary = _maybe_wait(signal_wait_all_fn, topics, timeout_ms)
+        return {"ok": True, "children": conv_ids, "topics": topics, "wait": summary}
 
     return {"ok": True, "children": conv_ids, "topics": topics}
 
