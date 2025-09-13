@@ -211,7 +211,8 @@ class Worker:
             from magent2.bus.redis_adapter import RedisBus  # local import to avoid hard dep
 
             if isinstance(self._bus, RedisBus):
-                return self._bus._redis
+                # Use public API to avoid private attribute access
+                return self._bus.get_client()
         except Exception:
             return None
         return None
