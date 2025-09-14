@@ -189,7 +189,7 @@ async def test_gateway_stream_applies_payload_cap(monkeypatch: pytest.MonkeyPatc
     from magent2.gateway.app import create_app
 
     # Cap very small to force truncation
-    monkeypatch.setenv("GATEWAY_SSE_EVENT_MAX_BYTES", "32")
+    monkeypatch.setenv("GATEWAY_SSE_MAX_BYTES", "32")
 
     bus = InMemoryBus()
     app = create_app(bus)
