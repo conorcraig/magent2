@@ -185,7 +185,9 @@ class OpenAIAgentsRunner:
                 saw_explicit_output = True
 
         if not saw_explicit_output:
-            self._emit_synth_output(queue, envelope.conversation_id, accumulated_text_parts)
+            # Emit synthetic output only when we actually streamed any token text
+            if accumulated_text_parts:
+                self._emit_synth_output(queue, envelope.conversation_id, accumulated_text_parts)
 
     def _map_event(self, conversation_id: str, ev: Any, token_index: int) -> BaseStreamEvent | None:
         """Map SDK stream event to our v1 stream events.
@@ -262,12 +264,24 @@ class OpenAIAgentsRunner:
         tool_invocation = self._map_tool_invocation(conversation_id, name, args)
         if tool_invocation is not None:
             return tool_invocation
-        tool_result = self._map_tool_result(conversation_id, name, result)
+        # Prefer explicit final output if present or embedded in result dict
+        # First, check if the whole item is a final message
+        text_value = self._extract_text(item)
+        if self._is_final_item(item) and isinstance(text_value, str) and text_value:
+            return OutputEvent(
+                conversation_id=conversation_id,
+                text=text_value,
+                usage=self._extract_usage(item),
+            )
+        # Next, handle result dict carrying final text/usage
+        tool_result = self._map_tool_result_or_output(conversation_id, name, result)
+        if tool_result is not None and isinstance(tool_result, OutputEvent):
+            return tool_result
+        # Otherwise map tool invocation/result events
+        if tool_invocation is not None:
+            return tool_invocation
         if tool_result is not None:
             return tool_result
-        final_output = self._map_final_output_event(conversation_id, item)
-        if final_output is not None:
-            return final_output
         return None
 
     @staticmethod
@@ -298,6 +312,40 @@ class OpenAIAgentsRunner:
         if result is None and isinstance(item, dict):
             return item.get("result") or item.get("output") or item.get("content")
         return result
+
+    @staticmethod
+    def _map_tool_invocation(conversation_id: str, name: Any, args: Any) -> ToolStepEvent | None:
+        if isinstance(name, str) and name and (isinstance(args, dict) or isinstance(args, list)):
+            return ToolStepEvent(
+                conversation_id=conversation_id,
+                name=name,
+                args=OpenAIAgentsRunner._normalize_args(args if isinstance(args, (dict, list)) else {}),
+            )
+        return None
+
+    @staticmethod
+    def _map_tool_result_or_output(
+        conversation_id: str, name: Any, result: Any
+    ) -> BaseStreamEvent | None:
+        # If result is a dict with final output fields, emit OutputEvent with usage
+        if isinstance(result, dict):
+            text = OpenAIAgentsRunner._extract_text(result)
+            if isinstance(text, str) and text:
+                return OutputEvent(
+                    conversation_id=conversation_id,
+                    text=text,
+                    usage=OpenAIAgentsRunner._extract_usage(result),
+                )
+            return None
+        # Otherwise summarize tool result
+        if isinstance(name, str) and name and result is not None:
+            return ToolStepEvent(
+                conversation_id=conversation_id,
+                name=name,
+                args={},
+                result_summary=OpenAIAgentsRunner._summarize(result),
+            )
+        return None
 
     @staticmethod
     def _normalize_args(args: dict[str, Any] | list[Any]) -> dict[str, Any]:
