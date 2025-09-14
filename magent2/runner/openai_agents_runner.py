@@ -87,7 +87,10 @@ class OpenAIAgentsRunner:
     # Internal helpers
     # ----------------------------
     @staticmethod
-    def _try_put(queue: Queue[BaseStreamEvent | dict[str, Any] | None], item: BaseStreamEvent | dict[str, Any] | None) -> None:
+    def _try_put(
+        queue: Queue[BaseStreamEvent | dict[str, Any] | None],
+        item: BaseStreamEvent | dict[str, Any] | None,
+    ) -> None:
         try:
             queue.put_nowait(item)
         except Full:
@@ -142,7 +145,7 @@ class OpenAIAgentsRunner:
             # Best-effort; if directory cannot be created, the session creation will fail gracefully
             pass
 
-    def _start_result_stream(self, session: Any, content: str):
+    def _start_result_stream(self, session: Any, content: str) -> Any:
         if self._max_turns is not None:
             try:
                 return SDKRunner.run_streamed(
@@ -239,7 +242,9 @@ class OpenAIAgentsRunner:
         accumulated_text_parts: list[str],
     ) -> None:
         final_text = "".join(accumulated_text_parts)
-        OpenAIAgentsRunner._try_put(queue, OutputEvent(conversation_id=conversation_id, text=final_text))
+        OpenAIAgentsRunner._try_put(
+            queue, OutputEvent(conversation_id=conversation_id, text=final_text)
+        )
 
     # Note: log emission to stream is intentionally omitted to keep event order stable for tests.
 
@@ -321,7 +326,7 @@ class OpenAIAgentsRunner:
                 conversation_id=conversation_id,
                 name=name,
                 args=OpenAIAgentsRunner._normalize_args(
-                    args if isinstance(args, (dict, list)) else {}
+                    args if isinstance(args, dict | list) else {}
                 ),
             )
         return None
