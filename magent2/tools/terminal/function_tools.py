@@ -214,7 +214,8 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 "tool": "terminal.run",
                 "attributes": {
                     "cwd": cwd or "",
-                    "command": command.split(" ")[0] if command else "",
+                    "command": (command.split(" ")[0] if command else ""),
+                    "args_len": len(command.split(" ")[1:]) if command else 0,
                 },
             },
         )
@@ -233,14 +234,36 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
         concise = combined[: policy.function_output_max_chars]
 
         status = _format_status(result)
-        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-        # Single success log with both metadata and attributes
+        # Success log for observability
         logger.info(
             "tool success",
             extra={
                 "event": "tool_success",
                 "tool": "terminal.run",
-                "metadata": _success_metadata(cwd, command, result),
+                "attributes": _success_metadata(cwd, command, result),
+            },
+        )
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
+                "attributes": {
+                    "exit": result.get("exit_code"),
+                    "timeout": bool(result.get("timeout")),
+                    "truncated": bool(result.get("truncated")),
+                    "duration_ms": duration_ms,
+                    "output_len": len(concise),
+                },
+            },
+        )
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
                 "attributes": {
                     "exit": result.get("exit_code"),
                     "timeout": bool(result.get("timeout")),

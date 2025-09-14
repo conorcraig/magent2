@@ -22,6 +22,30 @@ def docker_compose_file(pytestconfig: pytest.Config) -> str:
     return os.path.join(str(pytestconfig.rootpath), "docker-compose.yml")
 
 
+@pytest.fixture(scope="session")
+def docker_compose_project_name() -> str:
+    """Use a dedicated project name so test stack never collides with dev stack."""
+    return "magent2_test"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _compose_fixed_test_ports() -> None:
+    """Default test stack to fixed, non-conflicting host ports.
+
+    - Dev defaults (compose): gateway 8000, redis 6379
+    - Test defaults (pytest): gateway 18000, redis 16379
+    Override via env if needed.
+    """
+    os.environ.setdefault("GATEWAY_PORT", "18000")
+    os.environ.setdefault("REDIS_PORT", "16379")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_openai_for_docker_tests() -> None:
+    """Ensure docker-based tests use EchoRunner, not real OpenAI APIs."""
+    os.environ["OPENAI_API_KEY"] = ""
+
+
 def _wait_until(timeout_s: float, pause_s: float, check: Callable[[], bool]) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:

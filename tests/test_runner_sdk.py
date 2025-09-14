@@ -201,6 +201,36 @@ def test_adapter_prefers_explicit_final_output_and_usage(monkeypatch: pytest.Mon
     assert out[-1].usage == {"input_tokens": 5, "output_tokens": 2}
 
 
+def test_adapter_maps_response_tool_call_created_and_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Simulate newer SDK shapes where tool calls surface as response.tool_call.* events
+    sdk_events = [
+        _make_event(
+            "response.tool_call.created",
+            {"id": "tc1", "name": "todo.create", "arguments": {"conversation_id": "1"}},
+        ),
+        _make_event(
+            "response.tool_call.completed",
+            {"id": "tc1", "name": "todo.create", "result": "created:abc"},
+        ),
+    ]
+    _patch_sdk_runner(monkeypatch, sdk_events)
+
+    runner, env = _build_runner_and_env()
+    out_any = list(runner.stream_run(env))
+    out = cast(list[BaseStreamEvent], out_any)
+
+    assert isinstance(out[0], ToolStepEvent)
+    assert (
+        out[0].name == "todo.create" and out[0].status == "start" and out[0].tool_call_id == "tc1"
+    )
+    assert isinstance(out[1], ToolStepEvent)
+    assert (
+        out[1].name == "todo.create" and out[1].status == "success" and out[1].tool_call_id == "tc1"
+    )
+
+
 def test_adapter_tolerates_mapping_errors_and_completes(monkeypatch: pytest.MonkeyPatch) -> None:
     class _EvilEvent:
         type = "run_item_stream_event"
