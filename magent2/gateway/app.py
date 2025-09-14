@@ -15,6 +15,94 @@ from magent2.bus.interface import Bus, BusMessage
 from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
 
 
+# ----------------------------
+# SSE utilities
+# ----------------------------
+def _sse_cap_bytes() -> int | None:
+    raw = os.getenv("GATEWAY_SSE_MAX_BYTES", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
+def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) -> dict[str, Any]:
+    """Ensure a JSON-serializable payload fits within cap_bytes when encoded.
+
+    If cap is None, return the payload as-is. If payload is too large, attempt
+    to truncate the `text` field when present; otherwise emit a minimal
+    truncated payload conserving the original event kind.
+    """
+    if cap_bytes is None:
+        return payload
+
+    # Quick fit check
+    try:
+        s = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if len(s) <= cap_bytes:
+            return payload
+    except Exception:
+        return _create_minimal_truncated_payload(payload, cap_bytes)
+
+    # Truncate `text` if present
+    if isinstance(payload.get("text"), str):
+        truncated = _truncate_text_field(payload, cap_bytes)
+        if truncated:
+            return truncated
+
+    # Fallback to minimal payload
+    return _create_minimal_truncated_payload(payload, cap_bytes)
+
+
+def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any] | None:
+    """Try to truncate the `text` field so the JSON fits within cap_bytes."""
+    try:
+        result = dict(payload)
+        original_text = result["text"]
+
+        base = dict(result)
+        base["text"] = ""
+        base["truncated"] = True
+        base["cap_bytes"] = cap_bytes
+
+        overhead = len(json.dumps(base, separators=(",", ":")).encode("utf-8"))
+        allowed_text_bytes = max(0, cap_bytes - overhead)
+
+        text_bytes = original_text.encode("utf-8")
+        trimmed = text_bytes[:allowed_text_bytes].decode("utf-8", errors="ignore")
+        base["text"] = trimmed
+
+        if len(json.dumps(base, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
+            return base
+    except Exception:
+        pass
+    return None
+
+
+def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any]:
+    """Create a compact truncated payload that fits within cap_bytes."""
+    try:
+        event_type = "output"
+        if isinstance(payload, dict) and "event" in payload:
+            event_type = str(payload["event"])
+
+        minimal = {
+            "event": event_type,
+            "truncated": True,
+            "cap_bytes": cap_bytes,
+        }
+
+        minimal_json = json.dumps(minimal, separators=(",", ":")).encode("utf-8")
+        if len(minimal_json) <= cap_bytes:
+            return minimal
+    except Exception:
+        pass
+    return {"event": "truncated"}
+
+
 class SendRequest(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     conversation_id: str
@@ -30,49 +118,6 @@ def create_app(bus: Bus) -> FastAPI:
     configure_uvicorn_logging()
     logger = get_json_logger("magent2.gateway")
     metrics = get_metrics()
-
-    def _sse_event_cap_bytes() -> int | None:
-        raw = (os.getenv("GATEWAY_SSE_EVENT_MAX_BYTES") or "").strip()
-        if not raw:
-            return None
-        try:
-            value = int(raw)
-            return value if value > 0 else None
-        except Exception:
-            return None
-
-    def _serialize_with_cap(payload: Any, cap: int | None) -> tuple[str, bool, int]:
-        """Serialize payload to JSON; if over cap, return a truncated summary.
-
-        Returns: (json_string, was_truncated, original_bytes_len)
-        """
-        try:
-            data = json.dumps(payload, separators=(",", ":"))
-        except Exception:
-            # Defensive: fall back to str(payload)
-            data = json.dumps({"event": "unknown", "repr": str(payload)})
-        original_len = len(data.encode("utf-8"))
-        if cap is None or original_len <= cap:
-            return data, False, original_len
-
-        # Build a concise, valid JSON summary that preserves the event kind
-        event_kind = ""
-        if isinstance(payload, dict):
-            try:
-                event_kind = str(payload.get("event", ""))
-            except Exception:
-                event_kind = ""
-        summary = {
-            "event": event_kind or "truncated",
-            "truncated": True,
-            "payload_len": original_len,
-        }
-        summary_json = json.dumps(summary, separators=(",", ":"))
-        # Ensure summary itself respects cap; if not, drop optional fields
-        if len(summary_json.encode("utf-8")) > (cap or 0):
-            summary_min = {"event": event_kind or "truncated", "truncated": True}
-            summary_json = json.dumps(summary_min, separators=(",", ":"))
-        return summary_json, True, original_len
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
@@ -158,13 +203,23 @@ def create_app(bus: Bus) -> FastAPI:
 
     @app.get("/stream/{conversation_id}")
     async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+        """Server‑Sent Events stream for a conversation.
+
+        Semantics:
+        - All `token` events are forwarded as they are produced, enabling
+          real‑time incremental rendering in clients.
+        - `output` and `tool_step` events are forwarded as‑is.
+
+        Parameters:
+        - conversation_id: stream topic key (`stream:{conversation_id}`)
+        - max_events: optional testing aid to stop after N events
+        """
         topic = f"stream:{conversation_id}"
-        cap = _sse_event_cap_bytes()
+        cap = _sse_cap_bytes()
 
         async def event_gen() -> Any:
             last_id: str | None = None
             sent = 0
-            first_token_sent = False
             # Simple polling loop over Bus.read
             while True:
                 items = await asyncio.to_thread(
@@ -173,33 +228,9 @@ def create_app(bus: Bus) -> FastAPI:
                 if items:
                     for m in items:
                         payload = m.payload
-                        # Filter: allow only the first token event; pass through others
-                        try:
-                            event_kind = str(payload.get("event", ""))
-                            if event_kind == "token":
-                                if first_token_sent:
-                                    # skip additional token chunks for stability
-                                    last_id = m.id
-                                    continue
-                                first_token_sent = True
-                        except Exception:
-                            # If payload is not dict-like, fall through without filtering
-                            pass
-                        json_text, was_truncated, orig_len = _serialize_with_cap(payload, cap)
-                        if was_truncated:
-                            # Record truncation for observability
-                            logger.info(
-                                "sse payload truncated",
-                                extra={
-                                    "event": "gateway_sse_truncated",
-                                    "conversation_id": conversation_id,
-                                    "payload_len": orig_len,
-                                },
-                            )
-                            metrics.increment(
-                                "gateway_sse_truncated", {"conversation_id": conversation_id}
-                            )
-                        yield f"data: {json_text}\n\n"
+                        safe_payload = _truncate_payload_for_sse(payload, cap)
+                        data = json.dumps(safe_payload, separators=(",", ":"))
+                        yield f"data: {data}\n\n"
                         last_id = m.id
                         sent += 1
                         if max_events is not None and sent >= max_events:
