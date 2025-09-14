@@ -258,6 +258,21 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 },
             },
         )
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "terminal.run",
+                "attributes": {
+                    "exit": result.get("exit_code"),
+                    "timeout": bool(result.get("timeout")),
+                    "truncated": bool(result.get("truncated")),
+                    "duration_ms": duration_ms,
+                    "output_len": len(concise),
+                },
+            },
+        )
         return f"{status}\noutput:\n{concise}"
     except Exception as exc:  # noqa: BLE001
         # Convert exceptions into a concise, redacted failure string

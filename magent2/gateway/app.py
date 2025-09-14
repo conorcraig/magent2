@@ -30,11 +30,16 @@ def _sse_cap_bytes() -> int | None:
 
 
 def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) -> dict[str, Any]:
-    """Ensure a JSON-serializable payload fits within cap_bytes when encoded."""
+    """Ensure a JSON-serializable payload fits within cap_bytes when encoded.
+
+    If cap is None, return the payload as-is. If payload is too large, attempt
+    to truncate the `text` field when present; otherwise emit a minimal
+    truncated payload conserving the original event kind.
+    """
     if cap_bytes is None:
         return payload
 
-    # Check if payload already fits
+    # Quick fit check
     try:
         s = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if len(s) <= cap_bytes:
@@ -42,7 +47,7 @@ def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) ->
     except Exception:
         return _create_minimal_truncated_payload(payload, cap_bytes)
 
-    # Try to truncate text field if present
+    # Truncate `text` if present
     if isinstance(payload.get("text"), str):
         truncated = _truncate_text_field(payload, cap_bytes)
         if truncated:
@@ -53,7 +58,7 @@ def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) ->
 
 
 def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any] | None:
-    """Try to truncate the text field to fit within cap_bytes."""
+    """Try to truncate the `text` field so the JSON fits within cap_bytes."""
     try:
         result = dict(payload)
         original_text = result["text"]
@@ -79,7 +84,7 @@ def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, A
 
 
 def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any]:
-    """Create a minimal truncated payload that fits within cap_bytes."""
+    """Create a compact truncated payload that fits within cap_bytes."""
     try:
         # Safe way to get event type
         event_type = "output"
@@ -98,7 +103,6 @@ def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -
             return minimal
     except Exception:
         pass
-
     return {"event": "truncated"}
 
 
