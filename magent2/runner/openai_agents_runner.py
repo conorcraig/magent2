@@ -280,11 +280,9 @@ class OpenAIAgentsRunner:
             )
         # Next, handle result dict carrying final text/usage
         tool_result = self._map_tool_result_or_output(conversation_id, name, result)
-        if tool_result is not None and isinstance(tool_result, OutputEvent):
+        if isinstance(tool_result, OutputEvent):
             return tool_result
-        # Otherwise map tool invocation/result events
-        if tool_invocation is not None:
-            return tool_invocation
+        # Otherwise map tool invocation/result events (invocation already handled above)
         if tool_result is not None:
             return tool_result
         return None

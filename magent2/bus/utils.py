@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from typing import Sequence
 
 
 def compute_publish_topics(recipient: str, conversation_id: str) -> list[str]:
@@ -19,4 +19,4 @@ def compute_publish_topics(recipient: str, conversation_id: str) -> list[str]:
     return topics
 
 
-__all__: Iterable[str] = ["compute_publish_topics"]
+__all__: Sequence[str] = ["compute_publish_topics"]
