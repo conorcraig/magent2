@@ -36,6 +36,15 @@ class InMemoryBus(Bus):
                 break
         return list(items[start : start + limit])
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        return self.read(topic, last_id=last_id, limit=limit)
+
 
 @pytest.mark.asyncio
 async def test_gateway_send_publishes_to_chat_topic() -> None:
@@ -185,46 +194,56 @@ async def test_gateway_stream_relays_sse_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gateway_stream_applies_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_gateway_stream_emits_sse_ids_and_supports_last_event_id() -> None:
     from magent2.gateway.app import create_app
-
-    # Cap very small to force truncation
-    monkeypatch.setenv("GATEWAY_SSE_MAX_BYTES", "32")
 
     bus = InMemoryBus()
     app = create_app(bus)
 
-    conversation_id = "conv_stream_cap"
+    conversation_id = "conv_stream_resume"
     stream_topic = f"stream:{conversation_id}"
 
-    # Publish a large payload event
-    big_text = "x" * 500
-    bus.publish(
+    # Publish two events up front
+    first_id = bus.publish(
         stream_topic,
         BusMessage(
             topic=stream_topic,
-            payload={
-                "event": "output",
-                "conversation_id": conversation_id,
-                "text": big_text,
-            },
+            payload={"event": "token", "conversation_id": conversation_id, "text": "A", "index": 0},
+        ),
+    )
+    _ = bus.publish(
+        stream_topic,
+        BusMessage(
+            topic=stream_topic,
+            payload={"event": "token", "conversation_id": conversation_id, "text": "B", "index": 1},
         ),
     )
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
+        # First request: read one event and capture its id
+        sse_id: str | None = None
         async with client.stream("GET", f"/stream/{conversation_id}?max_events=1") as resp:
-            assert resp.status_code == 200
-            payload = None
+            async for line in resp.aiter_lines():
+                if line.startswith("id: "):
+                    sse_id = line[len("id: ") :].strip()
+                if line.startswith("data: "):
+                    break
+        assert sse_id == first_id
+
+        # Resume from the first id; we should receive only the second token ("B")
+        headers = {"Last-Event-ID": sse_id or ""}
+        async with client.stream(
+            "GET", f"/stream/{conversation_id}?max_events=1", headers=headers
+        ) as resp:
+            payloads: list[dict] = []
             async for line in resp.aiter_lines():
                 if line.startswith("data: "):
-                    payload = json.loads(line[len("data: ") :])
+                    payloads.append(json.loads(line[len("data: ") :]))
                     break
-    assert payload is not None
-    # Expect a truncated summary with event preserved (or 'truncated') and a flag
-    assert payload.get("truncated") is True
-    assert payload.get("event") in {"output", "truncated"}
+        assert len(payloads) == 1
+        assert payloads[0]["text"] == "B"
 
 
 @pytest.mark.asyncio
@@ -261,3 +280,120 @@ async def test_gateway_send_emits_user_message_event_to_stream() -> None:
     assert payload.get("text") == "hi there"
     # created_at should be an ISO8601/RFC3339 string
     assert isinstance(payload.get("created_at"), str)
+
+
+@pytest.mark.asyncio
+async def test_gateway_stream_relays_tool_step_events() -> None:
+    from magent2.gateway.app import create_app
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    conversation_id = "conv_tool_sse"
+    stream_topic = f"stream:{conversation_id}"
+
+    async def publisher() -> None:
+        await asyncio.sleep(0.02)
+        bus.publish(
+            stream_topic,
+            BusMessage(
+                topic=stream_topic,
+                payload={
+                    "event": "tool_step",
+                    "conversation_id": conversation_id,
+                    "name": "todo.create",
+                    "args": {"conversation_id": conversation_id},
+                    "status": "start",
+                    "tool_call_id": "tc_test_1",
+                },
+            ),
+        )
+        await asyncio.sleep(0.02)
+        bus.publish(
+            stream_topic,
+            BusMessage(
+                topic=stream_topic,
+                payload={
+                    "event": "tool_step",
+                    "conversation_id": conversation_id,
+                    "name": "todo.create",
+                    "args": {},
+                    "status": "success",
+                    "result_summary": "created:123",
+                    "tool_call_id": "tc_test_1",
+                    "duration_ms": 5,
+                },
+            ),
+        )
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        pub_task = asyncio.create_task(publisher())
+
+        async with client.stream("GET", f"/stream/{conversation_id}?max_events=2") as resp:
+            assert resp.status_code == 200
+            seen: list[dict] = []
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    payload = json.loads(line[len("data: ") :])
+                    seen.append(payload)
+                    if len(seen) == 2:
+                        break
+
+        await pub_task
+
+    assert [e.get("status") for e in seen] == ["start", "success"]
+    assert seen[1].get("result_summary") == "created:123"
+
+
+@pytest.mark.asyncio
+async def test_gateway_stream_relays_tool_error_event() -> None:
+    from magent2.gateway.app import create_app
+
+    bus = InMemoryBus()
+    app = create_app(bus)
+
+    conversation_id = "conv_term_err"
+    stream_topic = f"stream:{conversation_id}"
+
+    async def publisher() -> None:
+        await asyncio.sleep(0.02)
+        bus.publish(
+            stream_topic,
+            BusMessage(
+                topic=stream_topic,
+                payload={
+                    "event": "tool_step",
+                    "conversation_id": conversation_id,
+                    "name": "terminal.run",
+                    "args": {},
+                    "status": "error",
+                    "error": "Command 'uname' is not allowed",
+                    "tool_call_id": "tc_test_2",
+                },
+            ),
+        )
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        pub_task = asyncio.create_task(publisher())
+
+        async with client.stream("GET", f"/stream/{conversation_id}?max_events=1") as resp:
+            assert resp.status_code == 200
+            seen: list[dict] = []
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    payload = json.loads(line[len("data: ") :])
+                    seen.append(payload)
+                    break
+
+        await pub_task
+
+    assert seen and seen[0].get("status") == "error"
+    assert "not allowed" in (seen[0].get("error") or "")

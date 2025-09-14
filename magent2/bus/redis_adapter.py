@@ -6,6 +6,8 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from magent2.observability import get_json_logger, get_metrics
+
 from .interface import Bus, BusMessage
 
 
@@ -28,7 +30,7 @@ class RedisBus(Bus):
     ) -> None:
         try:
             import redis
-        except Exception as exc:  # pragma: no cover - import-time error path
+        except ImportError as exc:  # pragma: no cover - import-time error path
             raise RuntimeError("redis package is required for RedisBus") from exc
 
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -74,6 +76,80 @@ class RedisBus(Bus):
         if self._group:
             return list(self._read_with_group(topic, limit))
         return list(self._read_without_group(topic, last_id, limit))
+
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:  # noqa: D401
+        """Block up to block_ms waiting for messages after last_id."""
+        if self._group:
+            return list(self._read_blocking_with_group(topic, limit, block_ms))
+        return list(self._read_blocking_without_group(topic, last_id, limit, block_ms))
+
+    # ----------------------------
+    # Blocking helpers (optional API used by signals)
+    # ----------------------------
+    def read_blocking_one(
+        self, topic: str, last_id: str | None, block_ms: int
+    ) -> BusMessage | None:
+        """Block up to block_ms waiting for one new message after last_id.
+
+        This uses XREAD with a block to await new entries when last_id is None or
+        a Redis entry id. When last_id is a UUID, it scans to locate the entry id
+        first, then blocks for messages strictly after it.
+        """
+        # Resolve an entry id cursor if needed
+        cursor_id = None
+        if last_id is None:
+            # Start from the end; block for the next message
+            cursor_id = "$"
+        elif self._is_entry_id(last_id):
+            cursor_id = last_id
+        else:
+            cursor_id = self._scan_for_uuid(topic, last_id, chunk_size=200) or "$"
+
+        # Block for one new message after cursor_id
+        resp = self._redis.xread(streams={topic: cursor_id}, count=1, block=max(1, int(block_ms)))
+        if not resp:
+            return None
+        _, items = resp[0]
+        if not items:
+            return None
+        entry_id, data = items[0]
+        return self._to_bus_message(topic, data, entry_id)
+
+    def read_any_blocking(
+        self, topics: list[str], cursors: dict[str, str | None], block_ms: int
+    ) -> tuple[str, BusMessage] | None:
+        """Block up to block_ms for any new message on topics after respective cursors.
+
+        Uses XREAD across multiple streams with a block. Cursors use "$" to mean
+        "from now" semantics, or a specific entry id to read after. UUID cursors are
+        first translated to entry ids via a bounded scan.
+        """
+        # Build stream cursor map
+        streams: dict[str, str] = {}
+        for t in topics:
+            cur = cursors.get(t)
+            if cur is None:
+                streams[t] = "$"
+            elif self._is_entry_id(cur):
+                streams[t] = cur
+            else:
+                entry = self._scan_for_uuid(t, cur, chunk_size=200)
+                streams[t] = entry if entry is not None else "$"
+
+        resp = self._redis.xread(streams=streams, count=1, block=max(1, int(block_ms)))
+        if not resp:
+            return None
+        stream, items = resp[0]
+        if not items:
+            return None
+        entry_id, data = items[0]
+        return stream, self._to_bus_message(stream, data, entry_id)
 
     # ----------------------------
     # Internal helpers
@@ -162,6 +238,62 @@ class RedisBus(Bus):
                 self._redis.xack(topic, self._group, entry_id)
             except Exception:
                 # If ack fails, proceed; tests will still detect pending if it occurs
+                logger = get_json_logger("magent2.bus")
+                logger.warning(
+                    "redis xack failed",
+                    extra={
+                        "event": "redis_xack_failed",
+                        "topic": topic,
+                        "group": str(self._group),
+                        "entry_id": entry_id,
+                    },
+                )
+                get_metrics().increment("bus_ack_failures", {"topic": topic})
+        return messages
+
+    def _read_blocking_without_group(
+        self, topic: str, last_id: str | None, limit: int, block_ms: int
+    ) -> Iterable[BusMessage]:
+        # Determine the starting id for XREAD
+        if last_id is None:
+            start_id = "$"  # only new messages
+        elif self._is_entry_id(last_id):
+            start_id = last_id
+        else:
+            # Try to resolve uuid to an entry id; if not found, tail from current end
+            resolved = self._scan_for_uuid(topic, last_id, max(limit * 2, 100))
+            start_id = resolved if resolved is not None else "$"
+
+        resp = self._redis.xread(streams={topic: start_id}, count=limit, block=block_ms) or []
+        if not resp:
+            return []
+        # resp shape: [(stream, [(entry_id, {field: value, ...}), ...])]
+        _, items = resp[0]
+        return [self._to_bus_message(topic, data, entry_id) for entry_id, data in items]
+
+    def _read_blocking_with_group(
+        self, topic: str, limit: int, block_ms: int
+    ) -> Iterable[BusMessage]:
+        self._ensure_group(topic)
+
+        resp = self._redis.xreadgroup(
+            groupname=self._group,
+            consumername=self._consumer,
+            streams={topic: ">"},
+            count=limit,
+            block=block_ms,
+        )
+
+        if not resp:
+            return []
+
+        _, items = resp[0]
+        messages: list[BusMessage] = []
+        for entry_id, data in items:
+            messages.append(self._to_bus_message(topic, data, entry_id))
+            try:
+                self._redis.xack(topic, self._group, entry_id)
+            except Exception:
                 pass
         return messages
 
@@ -184,7 +316,18 @@ class RedisBus(Bus):
         payload_raw = data.get("payload", "{}")
         try:
             payload = json.loads(payload_raw)
-        except Exception:
+        except json.JSONDecodeError:
+            # Malformed payload JSON – fall back to empty and record a warning/metric
+            logger = get_json_logger("magent2.bus")
+            logger.warning(
+                "invalid bus payload json",
+                extra={
+                    "event": "bus_payload_invalid_json",
+                    "topic": topic,
+                    "entry_id": entry_id,
+                },
+            )
+            get_metrics().increment("bus_payload_decode_errors", {"topic": topic})
             payload = {}
 
         bus_id = data.get("id") or entry_id

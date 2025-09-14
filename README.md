@@ -13,6 +13,8 @@ extend.
   transports.
 - Optional Gateway exposes HTTP POST for input and SSE for streaming output.
 
+See orchestration guidance: `docs/ORCHESTRATION.md`.
+
 ## Architecture
 
 ```mermaid
@@ -105,6 +107,23 @@ uv run python -m magent2.worker
 ```bash
 just up
 # gateway: http://localhost:8000/health
+```
+
+Ports and parallel stacks:
+
+- Dev defaults: `GATEWAY_PORT=8000`, `REDIS_PORT=6379` (from compose)
+- Test defaults: `GATEWAY_PORT=18000`, `REDIS_PORT=16379` (set by pytest fixtures)
+- Run dev and tests in parallel using a separate project name for tests:
+
+```bash
+# Dev stack (default ports)
+docker compose up -d
+
+# Test stack (fixed non-conflicting ports and project name)
+GATEWAY_PORT=18000 REDIS_PORT=16379 docker compose -p magent2_test up -d
+
+# Or let pytest manage bringing the stack up with its project name
+uv run pytest -q -m docker tests/e2e -q
 ```
 
 ### Send and stream via HTTP
@@ -224,6 +243,8 @@ Environment:
 Environment variables:
 
 - `REDIS_URL` (default `redis://localhost:6379/0` or compose service URL)
+  - When using Docker Compose, internal service URLs are fixed (`redis://redis:6379/0`).
+  - Host ports are configurable via `GATEWAY_PORT` and `REDIS_PORT`.
 - `AGENT_NAME` (worker target agent; default `DevAgent`)
 - `AGENT_MODEL` (Agents SDK model name, e.g., `gpt-4o-mini`; default `gpt-4o-mini`)
 - `AGENT_INSTRUCTIONS` (inline agent instructions; optional)

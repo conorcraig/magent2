@@ -65,9 +65,22 @@ def create_task_tool(
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().create_task(conversation_id=cid, title=ttl, metadata=md or {})
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "todo.create",
+                "attributes": {"task_id": t.id, "conversation_id": cid},
+            },
+        )
         return {"task": _serialize_task(t)}
     except redis.exceptions.RedisError as e:
         logger.error(
@@ -79,7 +92,12 @@ def create_task_tool(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
@@ -99,9 +117,22 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().get_task(tid)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "todo.get",
+                "attributes": {"task_id": tid, "found": bool(t)},
+            },
+        )
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
     except redis.exceptions.RedisError as e:
         logger.error(
@@ -113,7 +144,12 @@ def get_task_tool(task_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
@@ -133,9 +169,22 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         tasks = _get_store().list_tasks(cid)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "todo.list",
+                "attributes": {"conversation_id": cid, "count": len(tasks)},
+            },
+        )
         return {"tasks": [_serialize_task(t) for t in tasks]}
     except redis.exceptions.RedisError as e:
         logger.error(
@@ -147,7 +196,12 @@ def list_tasks_tool(conversation_id: str) -> dict[str, Any]:
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"tasks": [], "error": str(e), "transient": True}
 
@@ -178,9 +232,22 @@ def update_task_tool(
             },
         )
         metrics.increment(
-            "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_calls",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         t = _get_store().update_task(tid, title=title, completed=completed, metadata=md)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "todo.update",
+                "attributes": {"task_id": tid, "updated": bool(t)},
+            },
+        )
         return {"task": _serialize_task(t)} if t is not None else {"task": None}
     except redis.exceptions.RedisError as e:
         logger.error(
@@ -192,7 +259,12 @@ def update_task_tool(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "todo",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
         return {"task": None, "error": str(e), "transient": True}
 
@@ -215,6 +287,14 @@ def delete_task_tool(task_id: str) -> dict[str, Any]:
             "tool_calls", {"tool": "todo", "conversation_id": str(ctx.get("conversation_id", ""))}
         )
         ok = _get_store().delete_task(tid)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "todo.delete",
+                "attributes": {"task_id": tid, "ok": bool(ok)},
+            },
+        )
         return {"ok": bool(ok)}
     except redis.exceptions.RedisError as e:
         logger.error(

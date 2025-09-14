@@ -14,6 +14,7 @@ services:
     build: .
     image: magent2/gateway:local
     working_dir: /app
+    init: true
     environment:
       - REDIS_URL=redis://redis:6379/0
       - SERVICE_NAME=gateway
@@ -44,6 +45,7 @@ services:
     build: .
     image: magent2/worker:local
     working_dir: /app
+    init: true
     environment:
       - REDIS_URL=redis://redis:6379/0
       - AGENT_NAME=${AGENT_NAME:-DevAgent}

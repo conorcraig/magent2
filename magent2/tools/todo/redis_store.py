@@ -84,7 +84,7 @@ class RedisTodoStore(TodoStore):
         try:
             data = json.loads(raw.decode("utf-8"))
             return Task.model_validate(data)
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
             # Log a warning when stored JSON is invalid/corrupt to aid diagnostics
             self._logger.warning(
                 "invalid todo task JSON; returning None",

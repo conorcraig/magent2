@@ -67,6 +67,7 @@ def _add_standard_extras(payload: dict[str, Any], record: logging.LogRecord) -> 
         "trace_id",
         "request_id",
         "attributes",
+        "metadata",
     ):
         if hasattr(record, attr):
             payload[attr] = getattr(record, attr)
@@ -154,7 +155,13 @@ class ConsoleLogFormatter(logging.Formatter):
             parts.append(f"conv={self._shorten(str(conv_id))}")
         if run_id:
             parts.append(f"run={self._shorten(str(run_id))}")
+        # Show key kv summary when available on run completion for readability
+        kv = getattr(record, "kv", None)
         parts.append("-")
+        if event == "run_completed" and isinstance(kv, dict):
+            tc = kv.get("tool_calls")
+            te = kv.get("tool_errors")
+            parts.append(f"kv.tool_calls={tc} kv.tool_errors={te}")
         parts.append(msg)
         return " ".join(parts)
 

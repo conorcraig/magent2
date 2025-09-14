@@ -64,7 +64,7 @@ def _resolve_conversation_id(
 
 
 def _build_envelope(
-    conversation_id: str, sender: str, recipient: str, content: str
+    conversation_id: str, sender: str, recipient: str, content: str, metadata: dict[str, Any] | None
 ) -> MessageEnvelope:
     return MessageEnvelope(
         conversation_id=conversation_id,
@@ -72,7 +72,7 @@ def _build_envelope(
         recipient=recipient,
         type="message",
         content=content,
-        metadata={},
+        metadata=dict(metadata or {}),
     )
 
 
@@ -100,6 +100,7 @@ def send_message(
     *,
     conversation_id: str | None = None,
     context: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     logger = get_json_logger("magent2.tools")
     metrics = get_metrics()
@@ -113,7 +114,7 @@ def send_message(
 
     cid = _resolve_conversation_id(rec, context, conversation_id)
     sender = _resolve_sender()
-    env = _build_envelope(cid, sender, rec, text)
+    env = _build_envelope(cid, sender, rec, text, metadata)
 
     bus = _get_bus()
     logger.info(
@@ -126,10 +127,22 @@ def send_message(
     )
     metrics.increment(
         "tool_calls",
-        {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))},
+        {
+            "tool": "chat",
+            "conversation_id": str(ctx.get("conversation_id", "")),
+            "run_id": str(ctx.get("run_id", "")),
+        },
     )
     try:
         published_to = _publish(bus, env)
+        logger.info(
+            "tool success",
+            extra={
+                "event": "tool_success",
+                "tool": "chat.send",
+                "metadata": {"recipient": rec, "published_to": published_to},
+            },
+        )
         return {"ok": True, "envelope_id": env.id, "published_to": published_to}
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -141,6 +154,12 @@ def send_message(
             },
         )
         metrics.increment(
-            "tool_errors", {"tool": "chat", "conversation_id": str(ctx.get("conversation_id", ""))}
+            "tool_errors",
+            {
+                "tool": "chat",
+                "conversation_id": str(ctx.get("conversation_id", "")),
+                "run_id": str(ctx.get("run_id", "")),
+            },
         )
+        # Re-raise so callers can handle according to their policy
         raise

@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -63,6 +63,7 @@ def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, A
         result = dict(payload)
         original_text = result["text"]
 
+        # Compute overhead without text content
         base = dict(result)
         base["text"] = ""
         base["truncated"] = True
@@ -85,6 +86,7 @@ def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, A
 def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -> dict[str, Any]:
     """Create a compact truncated payload that fits within cap_bytes."""
     try:
+        # Safe way to get event type
         event_type = "output"
         if isinstance(payload, dict) and "event" in payload:
             event_type = str(payload["event"])
@@ -95,6 +97,7 @@ def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -
             "cap_bytes": cap_bytes,
         }
 
+        # Verify it fits
         minimal_json = json.dumps(minimal, separators=(",", ":")).encode("utf-8")
         if len(minimal_json) <= cap_bytes:
             return minimal
@@ -159,6 +162,10 @@ def create_app(bus: Bus) -> FastAPI:
                             "agent": agent_name,
                         },
                     )
+                    metrics.increment(
+                        "gateway_bus_publish_errors",
+                        {"path": "send", "conversation_id": message.conversation_id},
+                    )
                     raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         # Publish a stream-visible user_message event so clients can render inbound messages
@@ -183,6 +190,14 @@ def create_app(bus: Bus) -> FastAPI:
                     "stage": "stream_user_message",
                 },
             )
+            metrics.increment(
+                "gateway_bus_publish_errors",
+                {
+                    "path": "send",
+                    "conversation_id": message.conversation_id,
+                    "stage": "stream_user_message",
+                },
+            )
             raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
         logger.info(
@@ -202,7 +217,12 @@ def create_app(bus: Bus) -> FastAPI:
         return {"status": "ok", "topic": conv_topic}
 
     @app.get("/stream/{conversation_id}")
-    async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+    async def stream(
+        conversation_id: str,
+        request: Request,
+        max_events: int | None = None,
+        last_id: str | None = None,
+    ) -> Response:
         """Server‑Sent Events stream for a conversation.
 
         Semantics:
@@ -215,29 +235,48 @@ def create_app(bus: Bus) -> FastAPI:
         - max_events: optional testing aid to stop after N events
         """
         topic = f"stream:{conversation_id}"
-        cap = _sse_cap_bytes()
 
         async def event_gen() -> Any:
-            last_id: str | None = None
+            cursor: str | None = last_id or request.headers.get("Last-Event-ID") or None
             sent = 0
+            cap = _sse_cap_bytes()
+            # Detect if the underlying bus supports blocking reads (e.g., Redis consumer groups)
+            try:
+                blocking_supported = (
+                    bool(getattr(bus, "_group", None))
+                    and int(getattr(bus, "_block_ms", 0) or 0) > 0
+                )
+            except Exception:
+                blocking_supported = False
             # Simple polling loop over Bus.read
+            import time as _time
+
+            last_hb = _time.monotonic()
             while True:
                 items = await asyncio.to_thread(
-                    lambda: list(bus.read(topic, last_id=last_id, limit=100))
+                    lambda: list(bus.read(topic, last_id=cursor, limit=100))
                 )
                 if items:
                     for m in items:
                         payload = m.payload
                         safe_payload = _truncate_payload_for_sse(payload, cap)
                         data = json.dumps(safe_payload, separators=(",", ":"))
+                        # Emit SSE id for resume support
+                        yield f"id: {m.id}\n"
                         yield f"data: {data}\n\n"
-                        last_id = m.id
+                        cursor = m.id
                         sent += 1
                         if max_events is not None and sent >= max_events:
                             return
                 else:
                     # avoid tight loop when no new items are available
-                    await asyncio.sleep(0.02)
+                    if not blocking_supported:
+                        await asyncio.sleep(0.02)
+                # Heartbeat every 15s to keep connections alive through proxies
+                now = _time.monotonic()
+                if now - last_hb >= 15.0:
+                    last_hb = now
+                    yield ":\n\n"
 
         logger.info(
             "gateway stream start",
@@ -245,10 +284,17 @@ def create_app(bus: Bus) -> FastAPI:
                 "event": "gateway_stream",
                 "service": "gateway",
                 "conversation_id": conversation_id,
+                "last_event_id": request.headers.get("Last-Event-ID") or last_id or "",
             },
         )
         metrics.increment("gateway_streams", {"conversation_id": conversation_id})
-        return StreamingResponse(event_gen(), media_type="text/event-stream")
+        sse_headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Hint for reverse proxies like Nginx to disable response buffering
+            "X-Accel-Buffering": "no",
+        }
+        return StreamingResponse(event_gen(), media_type="text/event-stream", headers=sse_headers)
 
     @app.get("/ready")
     async def ready() -> dict[str, str]:
@@ -261,6 +307,7 @@ def create_app(bus: Bus) -> FastAPI:
                 "gateway not ready",
                 extra={"event": "gateway_error", "service": "gateway", "path": "ready"},
             )
+            metrics.increment("gateway_ready_errors", {})
             raise HTTPException(status_code=503, detail="bus not ready") from exc
 
     return app

@@ -42,6 +42,7 @@ def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
                 "event": "tool_step",
                 "name": "dummy",
                 "result_summary": "ok",
+                "status": "success",
                 "created_at": created_late,
             }
         ),

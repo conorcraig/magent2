@@ -55,6 +55,21 @@ class InProcessBus(Bus):
                 break
         return list(items[start : start + max(1, limit)])
 
+    def read_blocking(
+        self,
+        topic: str,
+        last_id: str | None = None,
+        limit: int = 100,
+        block_ms: int = 1000,
+    ) -> Iterable[BusMessage]:
+        # Simple in-process shim: poll with small sleeps up to block_ms budget
+        deadline = time.time() + max(0, block_ms) / 1000.0
+        while True:
+            out = list(self.read(topic, last_id=last_id, limit=limit))
+            if out or time.time() >= deadline:
+                return out
+            time.sleep(0.01)
+
 
 def _start_gateway(bus: Bus) -> None:
     app = create_app(bus)
