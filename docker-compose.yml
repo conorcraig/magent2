@@ -58,7 +58,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Ensure tools can be explicitly configured and terminal policy can allow commands
       - AGENT_TOOLS=${AGENT_TOOLS:-}
-      - TERMINAL_ALLOWED_COMMANDS=${TERMINAL_ALLOWED_COMMANDS:-}
+      # Only pass through TERMINAL_ALLOWED_COMMANDS if set in the host env.
+      # Leaving it unset ensures the worker uses the built-in safe defaults.
+      - TERMINAL_ALLOWED_COMMANDS
     depends_on:
       redis:
         condition: service_healthy
