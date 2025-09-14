@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from magent2.bus.interface import Bus, BusMessage
+from magent2.bus.utils import compute_publish_topics
 from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
 
 
@@ -128,59 +129,52 @@ def create_app(bus: Bus) -> FastAPI:
 
     @app.post("/send")
     async def send(message: SendRequest) -> dict[str, Any]:
-        # Always publish to conversation topic for compatibility
         payload = message.model_dump(mode="json")
         conv_topic = f"chat:{message.conversation_id}"
-        try:
-            bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=payload))
-        except Exception as exc:
-            logger.error(
-                "gateway send error",
-                extra={
+
+        def _publish_or_503(
+            topic: str, *, stage: str | None = None, extra: dict[str, Any] | None = None
+        ) -> None:
+            try:
+                bus.publish(topic, BusMessage(topic=topic, payload=payload))
+            except Exception as exc:  # pragma: no cover - error path mapping
+                fields: dict[str, Any] = {
                     "event": "gateway_error",
                     "path": "send",
                     "conversation_id": message.conversation_id,
-                },
-            )
-            raise HTTPException(status_code=503, detail="bus publish failed") from exc
+                }
+                if stage:
+                    fields["stage"] = stage
+                if isinstance(extra, dict):
+                    fields.update(extra)
+                logger.error("gateway send error", extra=fields)
+                metrics.increment(
+                    "gateway_bus_publish_errors",
+                    {"path": "send", "conversation_id": message.conversation_id, **(extra or {})},
+                )
+                raise HTTPException(status_code=503, detail="bus publish failed") from exc
 
-        # Additionally publish to agent topic when recipient hints an agent
-        recipient = str(message.recipient)
-        if recipient.startswith("agent:"):
-            agent_name = recipient.split(":", 1)[1] or ""
-            if agent_name:
-                agent_topic = f"chat:{agent_name}"
-                try:
-                    bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=payload))
-                except Exception as exc:
-                    logger.error(
-                        "gateway send error",
-                        extra={
-                            "event": "gateway_error",
-                            "path": "send",
-                            "conversation_id": message.conversation_id,
-                            "agent": agent_name,
-                        },
-                    )
-                    metrics.increment(
-                        "gateway_bus_publish_errors",
-                        {"path": "send", "conversation_id": message.conversation_id},
-                    )
-                    raise HTTPException(status_code=503, detail="bus publish failed") from exc
+        # Publish to conversation and optional agent topics
+        for topic in compute_publish_topics(message.recipient, message.conversation_id):
+            extra: dict[str, Any] | None = None
+            if topic != conv_topic and topic.startswith("chat:"):
+                extra = {"agent": topic.split(":", 1)[1]}
+            _publish_or_503(topic, extra=extra)
 
         # Publish a stream-visible user_message event so clients can render inbound messages
+        stream_topic = f"stream:{message.conversation_id}"
+        user_event = {
+            "event": "user_message",
+            "conversation_id": message.conversation_id,
+            "sender": message.sender,
+            "text": message.content,
+            # RFC3339 timestamp for client-side staleness filtering
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        stream_payload = BusMessage(topic=stream_topic, payload=user_event).payload
         try:
-            stream_topic = f"stream:{message.conversation_id}"
-            user_event = {
-                "event": "user_message",
-                "conversation_id": message.conversation_id,
-                "sender": message.sender,
-                "text": message.content,
-                # RFC3339 timestamp for client-side staleness filtering
-                "created_at": datetime.now(UTC).isoformat(),
-            }
-            bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=user_event))
-        except Exception as exc:
+            bus.publish(stream_topic, BusMessage(topic=stream_topic, payload=stream_payload))
+        except Exception as exc:  # pragma: no cover - error path mapping
             logger.error(
                 "gateway send error",
                 extra={

@@ -2,48 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterable
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from magent2.bus.interface import Bus, BusMessage
+from magent2.bus.interface import BusMessage
 from magent2.models.envelope import MessageEnvelope
-
-
-class InMemoryBus(Bus):
-    def __init__(self) -> None:
-        self._topics: dict[str, list[BusMessage]] = {}
-
-    def publish(self, topic: str, message: BusMessage) -> str:
-        self._topics.setdefault(topic, []).append(message)
-        return message.id
-
-    def read(
-        self,
-        topic: str,
-        last_id: str | None = None,
-        limit: int = 100,
-    ) -> Iterable[BusMessage]:
-        items = self._topics.get(topic, [])
-        if last_id is None:
-            return list(items[-limit:])
-        start = 0
-        for i, m in enumerate(items):
-            if m.id == last_id:
-                start = i + 1
-                break
-        return list(items[start : start + limit])
-
-    def read_blocking(
-        self,
-        topic: str,
-        last_id: str | None = None,
-        limit: int = 100,
-        block_ms: int = 1000,
-    ) -> Iterable[BusMessage]:
-        return self.read(topic, last_id=last_id, limit=limit)
+from tests.helpers.bus import InMemoryBus
 
 
 @pytest.mark.asyncio

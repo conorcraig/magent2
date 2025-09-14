@@ -6,11 +6,11 @@ import time
 from typing import Any
 
 from magent2.bus.interface import Bus, BusMessage
-from magent2.observability import SENSITIVE_KEYS, get_run_context
+from magent2.observability import get_run_context, redact
 
 _TEST_BUS: Bus | None = None
 _BUS_CACHE: Bus | None = None
-_CURSORS_BY_CONVERSATION: dict[str, dict[str, str]] = {}
+_CURSORs_BY_CONVERSATION: dict[str, dict[str, str]] = {}
 
 
 def set_bus_for_testing(bus: Bus | None) -> None:
@@ -56,26 +56,15 @@ def _ensure_payload_within_cap(payload: dict[str, Any]) -> int:
     # Return the serialized length for metrics/SSE, and raise if over cap when configured
     payload_str = json.dumps(payload, separators=(",", ":"))
     cap = _payload_cap_bytes()
-    if cap is not None and len(payload_str.encode("utf-8")) > cap:
+    size = len(payload_str.encode("utf-8"))
+    if cap is not None and size > cap:
         raise ValueError("payload too large for configured cap")
-    return len(payload_str.encode("utf-8"))
+    return size
 
 
 def _redact(obj: Any) -> Any:
-    # Minimal recursive redaction based on SENSITIVE_KEYS
-    from collections.abc import Mapping
-
-    if isinstance(obj, Mapping):
-        redacted: dict[str, Any] = {}
-        for k, v in obj.items():
-            if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
-                redacted[k] = "[REDACTED]"
-            else:
-                redacted[k] = _redact(v)
-        return redacted
-    if isinstance(obj, list | tuple):
-        return [_redact(v) for v in obj]
-    return obj
+    # Delegate to shared redact for consistency
+    return redact(obj)
 
 
 def _redacted_signal_message(message_payload: dict[str, Any]) -> dict[str, Any]:
@@ -115,14 +104,14 @@ def _get_persisted_cursor(topic: str) -> str | None:
     conversation_id = _maybe_get_conversation_id()
     if not conversation_id:
         return None
-    return _CURSORS_BY_CONVERSATION.get(conversation_id, {}).get(topic)
+    return _CURSORs_BY_CONVERSATION.get(conversation_id, {}).get(topic)
 
 
 def _set_persisted_cursor(topic: str, last_id: str) -> None:
     conversation_id = _maybe_get_conversation_id()
     if not conversation_id:
         return
-    slot = _CURSORS_BY_CONVERSATION.setdefault(conversation_id, {})
+    slot = _CURSORs_BY_CONVERSATION.setdefault(conversation_id, {})
     slot[topic] = last_id
 
 
@@ -279,11 +268,10 @@ def wait_for_signal(topic: str, *, last_id: str | None, timeout_ms: int) -> dict
     if not name:
         raise ValueError("topic must be non-empty")
     _require_allowed_topic(name)
-    if timeout_ms <= 0:
-        timeout_ms = 1
+    timeout_ms = _fix_timeout_ms(timeout_ms)
 
     bus = _get_bus()
-    deadline = time.time() + (timeout_ms / 1000.0)
+    deadline = _deadline_from_timeout_ms(timeout_ms)
     cursor: str | None = last_id if last_id is not None else _get_persisted_cursor(name)
 
     # Fast path: try a non-blocking read first

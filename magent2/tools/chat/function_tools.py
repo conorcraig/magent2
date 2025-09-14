@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from magent2.bus.interface import Bus, BusMessage
+from magent2.bus.utils import compute_publish_topics
 from magent2.models.envelope import MessageEnvelope
 from magent2.observability import (
     get_json_logger,
@@ -78,19 +79,9 @@ def _build_envelope(
 
 def _publish(bus: Bus, envelope: MessageEnvelope) -> list[str]:
     payload = envelope.model_dump(mode="json")
-    topics: list[str] = []
-
-    conv_topic = f"chat:{envelope.conversation_id}"
-    bus.publish(conv_topic, BusMessage(topic=conv_topic, payload=payload))
-    topics.append(conv_topic)
-
-    if envelope.recipient.startswith("agent:"):
-        agent_name = envelope.recipient.split(":", 1)[1]
-        if agent_name:
-            agent_topic = f"chat:{agent_name}"
-            bus.publish(agent_topic, BusMessage(topic=agent_topic, payload=payload))
-            topics.append(agent_topic)
-
+    topics = compute_publish_topics(envelope.recipient, envelope.conversation_id)
+    for topic in topics:
+        bus.publish(topic, BusMessage(topic=topic, payload=payload))
     return topics
 
 
