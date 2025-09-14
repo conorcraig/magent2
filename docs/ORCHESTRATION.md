@@ -57,6 +57,7 @@ for topic in res["topics"]:
 ```
 
 Notes:
+
 - Prefer a loop with `last_id` to preserve ordering and avoid lost wakeups.
 - For N children, a simple approach is to wait on each `topic` until you observe one message, then proceed.
 

@@ -99,6 +99,74 @@ class TerminalPolicy:
     redact_patterns: list[str]
 
 
+# Sensible defaults for development and CI environments
+DEFAULT_ALLOWED_COMMANDS = [
+    # Core utilities
+    "bash",
+    "echo",
+    "printf",
+    "cat",
+    "ls",
+    "head",
+    "tail",
+    "find",
+    "grep",
+    "xargs",
+    # Text processing
+    "sed",
+    "awk",
+    "tr",
+    "cut",
+    "sort",
+    "uniq",
+    "tee",
+    "wc",
+    # File info
+    "stat",
+    "file",
+    "base64",
+    "md5sum",
+    "sha256sum",
+    # System info
+    "ps",
+    "date",
+    "env",
+    "whoami",
+    "id",
+    "uname",
+    "df",
+    "du",
+    "free",
+    "top",
+    "history",
+    # Control flow
+    "sleep",
+    "timeout",
+    "nohup",
+    "which",
+    "type",
+    # Development tools
+    "python3",
+    "git",
+    "curl",
+    "wget",
+    "jq",
+    "node",
+    "npm",
+    "docker",
+    # File operations
+    "tar",
+    "zip",
+    "unzip",
+    "cp",
+    "mv",
+    "ln",
+    "mkdir",
+    "touch",
+    "chmod",
+]
+
+
 def _split_csv_env(name: str) -> list[str]:
     value = os.getenv(name, "")
     value = value.strip()
@@ -107,8 +175,20 @@ def _split_csv_env(name: str) -> list[str]:
     return [s for s in (x.strip() for x in value.split(",")) if s]
 
 
+# One-time policy cache (process lifetime)
+_POLICY_CACHE: TerminalPolicy | None = None
+
+
 def _load_policy_from_env() -> TerminalPolicy:
-    allowed = _split_csv_env("TERMINAL_ALLOWED_COMMANDS")
+    # Use built-in defaults unless explicitly overridden
+    env_allowed = os.getenv("TERMINAL_ALLOWED_COMMANDS")
+    if env_allowed is not None:
+        # Explicitly set (could be empty string to deny all)
+        allowed = _split_csv_env("TERMINAL_ALLOWED_COMMANDS")
+    else:
+        # Not set - use defaults
+        allowed = DEFAULT_ALLOWED_COMMANDS.copy()
+
     timeout = float(os.getenv("TERMINAL_TIMEOUT_SECONDS", "5.0"))
     cap_bytes = int(os.getenv("TERMINAL_OUTPUT_CAP_BYTES", "8192"))
     max_chars = int(os.getenv("TERMINAL_FUNCTION_OUTPUT_MAX_CHARS", "1000"))
@@ -130,14 +210,27 @@ def _load_policy_from_env() -> TerminalPolicy:
         r"\b[0-9a-fA-F]{32,}\b",
     ]
 
-    return TerminalPolicy(
-        allowed_commands=allowed,
-        timeout_seconds=timeout,
-        output_cap_bytes=cap_bytes,
-        function_output_max_chars=max_chars,
-        redact_substrings=substrings,
-        redact_patterns=patterns,
-    )
+    # Cache once per process to prevent runtime policy flips in unattended agents
+    global _POLICY_CACHE
+    if _POLICY_CACHE is None:
+        _POLICY_CACHE = TerminalPolicy(
+            allowed_commands=allowed,
+            timeout_seconds=timeout,
+            output_cap_bytes=cap_bytes,
+            function_output_max_chars=max_chars,
+            redact_substrings=substrings,
+            redact_patterns=patterns,
+        )
+    return _POLICY_CACHE
+
+
+def _reset_terminal_policy_cache_for_tests() -> None:
+    """Testing-only: reset the cached policy to allow per-test env changes.
+
+    Do not call this in production code. Use only from tests.
+    """
+    global _POLICY_CACHE
+    _POLICY_CACHE = None
 
 
 def _redact_label_values(text: str) -> str:
@@ -258,21 +351,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 },
             },
         )
-        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-        logger.info(
-            "tool success",
-            extra={
-                "event": "tool_success",
-                "tool": "terminal.run",
-                "attributes": {
-                    "exit": result.get("exit_code"),
-                    "timeout": bool(result.get("timeout")),
-                    "truncated": bool(result.get("truncated")),
-                    "duration_ms": duration_ms,
-                    "output_len": len(concise),
-                },
-            },
-        )
+        # Note: success is logged once with duration/output_len; avoid duplicate entries
         return f"{status}\noutput:\n{concise}"
     except Exception as exc:  # noqa: BLE001
         # Convert exceptions into a concise, redacted failure string

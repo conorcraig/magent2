@@ -264,7 +264,7 @@ At startup, the Worker selects the runner based on `OPENAI_API_KEY` and logs the
 
 ### Terminal tool (policy via env)
 
-- `TERMINAL_ALLOWED_COMMANDS`: comma‑separated list of allowed command basenames (e.g., `echo,bash,python3`). Default: empty (deny by default).
+- `TERMINAL_ALLOWED_COMMANDS`: comma‑separated list of allowed command basenames (e.g., `echo,bash,python3`). Default: comprehensive set including common utilities, text processing, system info, development tools, and file operations. Set to empty string to deny all commands.
 - `TERMINAL_TIMEOUT_SECONDS`: float seconds before forceful termination. Default: `5.0`.
 - `TERMINAL_OUTPUT_CAP_BYTES`: byte cap for combined stdout/stderr enforced by the low‑level tool. Default: `8192`.
 - `TERMINAL_FUNCTION_OUTPUT_MAX_CHARS`: character cap for the concise string returned to the model. Default: `1000`.

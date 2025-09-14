@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _pytest.terminal import TerminalReporter
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -179,3 +180,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(
                 pytest.mark.skip(reason="Redis not available; set REDIS_URL or start local Redis")
             )
+
+
+def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int) -> None:  # noqa: D401
+    """Print a concise pointer to the JSON report for detailed failures.
+
+    Keeps terminal output minimal and directs agents/tools to the structured file.
+    """
+    # Only print pointer when tests were collected
+    total = getattr(terminalreporter, "_numcollected", 0)
+    if total:
+        terminalreporter.write_sep(
+            "-",
+            "Results: reports/pytest-report.json (JSON). See this file for full details.",
+        )

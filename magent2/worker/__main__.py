@@ -13,6 +13,7 @@ from magent2.observability import get_json_logger
 from magent2.runner.config import load_config
 from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
 from magent2.runner.openai_responses_runner import OpenAIResponsesRunner
+from magent2.tools.registry import discover_tools
 from magent2.worker.worker import Runner, Worker
 
 
@@ -27,104 +28,7 @@ def build_runner_from_env() -> Runner:
     if cfg.api_key:
         from agents import Agent  # defer import to avoid issues in Echo mode
 
-        def _load_tools(names: list[str]) -> list[Any]:
-            """Resolve configured tool names to decorated function tool objects.
-
-            If no names are provided, include a safe default set of available tools.
-            Unknown names are ignored.
-            """
-            available: dict[str, Any] = {}
-
-            # Terminal tool (single-function)
-            try:
-                from magent2.tools.terminal.function_tools import terminal_run_tool
-
-                available["terminal_run_tool"] = terminal_run_tool
-            except Exception:
-                pass
-
-            # Chat tool (send message via bus)
-            try:
-                from magent2.tools.chat import chat_send
-
-                available["chat_send"] = chat_send
-            except Exception:
-                pass
-
-            # Signals tools (send/wait)
-            try:
-                from magent2.tools.signals.wrappers import signal_send, signal_wait
-
-                available["signal_send"] = signal_send
-                available["signal_wait"] = signal_wait
-            except Exception:
-                pass
-
-            # Todo tools (CRUD)
-            try:
-                from magent2.tools.todo.tools import (
-                    todo_create,
-                    todo_delete,
-                    todo_get,
-                    todo_list,
-                    todo_update,
-                )
-
-                available.update(
-                    {
-                        "todo_create": todo_create,
-                        "todo_get": todo_get,
-                        "todo_list": todo_list,
-                        "todo_update": todo_update,
-                        "todo_delete": todo_delete,
-                    }
-                )
-            except Exception:
-                pass
-
-            # MCP tools (dynamic proxy -> function tools)
-            try:
-                from agents import function_tool  # needed to expose dynamic wrappers
-
-                from magent2.tools.mcp.registry import load_for_agent
-
-                gateway = load_for_agent(cfg.agent_name)
-                if gateway is not None:
-                    for info in gateway.list_tools():
-                        tool_name = str(info.name)
-
-                        def _make_proxy(name: str) -> Any:
-                            @function_tool(name_override=name)
-                            def _mcp_proxy(**kwargs: Any) -> dict[str, Any]:
-                                # Dispatch to gateway with a default timeout
-                                return gateway.call(name, arguments=kwargs, timeout=10.0)
-
-                            return _mcp_proxy
-
-                        # Only add if not shadowed by a built-in name
-                        if tool_name not in available:
-                            available[tool_name] = _make_proxy(tool_name)
-            except Exception:
-                # If MCP is misconfigured or decorator unavailable, skip silently
-                pass
-
-            resolved: list[Any] = []
-            if names:
-                for name in names:
-                    tool = available.get(name)
-                    if tool is not None:
-                        resolved.append(tool)
-                    else:
-                        get_json_logger("magent2").warning(
-                            "unknown tool name, skipping",
-                            extra={"event": "config_warn", "tool": name},
-                        )
-            else:
-                # Default to all detected tools for developer convenience
-                resolved = list(available.values())
-            return resolved
-
-        tools = _load_tools(cfg.tools)
+        tools = discover_tools(cfg.agent_name, cfg.tools)
         _tools_any: Any = tools  # satisfy type checker without SDK-specific types
         agent = Agent(
             name=cfg.agent_name, instructions=cfg.instructions, model=cfg.model, tools=_tools_any

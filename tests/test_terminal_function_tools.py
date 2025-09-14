@@ -7,6 +7,14 @@ import pytest
 from magent2.tools.terminal.function_tools import terminal_run
 
 
+@pytest.fixture(autouse=True)
+def _reset_terminal_policy_cache() -> None:
+    # Ensure each test starts with a fresh terminal policy snapshot
+    import magent2.tools.terminal.function_tools as ft
+
+    ft._reset_terminal_policy_cache_for_tests()
+
+
 @pytest.fixture()
 def tmp_script_dir(tmp_path: Path) -> Path:
     d = tmp_path / "scripts"
@@ -103,8 +111,39 @@ def test_high_entropy_token_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_returns_failure_string_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    # No allowed commands configured -> PermissionError -> function should return failure string
-    monkeypatch.delenv("TERMINAL_ALLOWED_COMMANDS", raising=False)
+    # Explicitly deny all commands -> PermissionError -> function should return failure string
+    _setenv(monkeypatch, TERMINAL_ALLOWED_COMMANDS="")
     out = terminal_run("echo hello")
+    assert out.startswith("ok=false ")
+    assert "error:\n" in out
+
+
+def test_defaults_allow_known_command_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When TERMINAL_ALLOWED_COMMANDS is unset, built-in defaults should apply."""
+    # Ensure variable is absent
+    monkeypatch.delenv("TERMINAL_ALLOWED_COMMANDS", raising=False)
+    # Reload module to clear any cached policy
+    import importlib
+
+    import magent2.tools.terminal.function_tools as ft
+
+    importlib.reload(ft)
+
+    out = ft.terminal_run("echo ok")
+    assert out.startswith("ok=true ")
+    assert "output:\nok" in out
+
+
+def test_empty_string_denies_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicitly empty allowlist should deny all commands."""
+    monkeypatch.setenv("TERMINAL_ALLOWED_COMMANDS", "")
+    # Reload to clear cached policy
+    import importlib
+
+    import magent2.tools.terminal.function_tools as ft
+
+    importlib.reload(ft)
+
+    out = ft.terminal_run("echo should_fail")
     assert out.startswith("ok=false ")
     assert "error:\n" in out
