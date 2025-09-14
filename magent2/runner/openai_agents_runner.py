@@ -87,10 +87,7 @@ class OpenAIAgentsRunner:
     # Internal helpers
     # ----------------------------
     @staticmethod
-    def _try_put(
-        queue: Queue[BaseStreamEvent | dict[str, Any] | None],
-        item: BaseStreamEvent | dict[str, Any] | None,
-    ) -> None:
+    def _try_put(queue: Queue[BaseStreamEvent | dict[str, Any] | None], item: BaseStreamEvent | dict[str, Any] | None) -> None:
         try:
             queue.put_nowait(item)
         except Full:
@@ -145,38 +142,35 @@ class OpenAIAgentsRunner:
             # Best-effort; if directory cannot be created, the session creation will fail gracefully
             pass
 
-    async def _run_streaming(
-        self,
-        envelope: MessageEnvelope,
-        queue: Queue[BaseStreamEvent | dict[str, Any] | None],
-    ) -> None:
-        session = self._get_session(envelope.conversation_id)
-        # Kick off the SDK streamed run (pass max_turns when supported)
+    def _start_result_stream(self, session: Any, content: str):
         if self._max_turns is not None:
             try:
-                result_stream = SDKRunner.run_streamed(
+                return SDKRunner.run_streamed(
                     self._agent,
-                    input=envelope.content or "",
+                    input=content,
                     session=session,
                     max_turns=self._max_turns,
                 )
             except TypeError:
-                # Older SDK without max_turns parameter
-                result_stream = SDKRunner.run_streamed(
+                return SDKRunner.run_streamed(
                     self._agent,
-                    input=envelope.content or "",
+                    input=content,
                     session=session,
                 )
-        else:
-            result_stream = SDKRunner.run_streamed(
-                self._agent,
-                input=envelope.content or "",
-                session=session,
-            )
+        return SDKRunner.run_streamed(
+            self._agent,
+            input=content,
+            session=session,
+        )
 
+    async def _drain_result_stream(
+        self,
+        envelope: MessageEnvelope,
+        result_stream: Any,
+        queue: Queue[BaseStreamEvent | dict[str, Any] | None],
+    ) -> None:
         token_index = 0
         accumulated_text_parts: list[str] = []
-
         saw_explicit_output = False
         async for ev in result_stream.stream_events():
             mapped = self._try_map_event(envelope.conversation_id, ev, token_index)
@@ -186,11 +180,17 @@ class OpenAIAgentsRunner:
             token_index += inc
             if saw_output:
                 saw_explicit_output = True
+        if not saw_explicit_output and accumulated_text_parts:
+            self._emit_synth_output(queue, envelope.conversation_id, accumulated_text_parts)
 
-        if not saw_explicit_output:
-            # Emit synthetic output only when we actually streamed any token text
-            if accumulated_text_parts:
-                self._emit_synth_output(queue, envelope.conversation_id, accumulated_text_parts)
+    async def _run_streaming(
+        self,
+        envelope: MessageEnvelope,
+        queue: Queue[BaseStreamEvent | dict[str, Any] | None],
+    ) -> None:
+        session = self._get_session(envelope.conversation_id)
+        result_stream = self._start_result_stream(session, envelope.content or "")
+        await self._drain_result_stream(envelope, result_stream, queue)
 
     def _map_event(self, conversation_id: str, ev: Any, token_index: int) -> BaseStreamEvent | None:
         """Map SDK stream event to our v1 stream events.
@@ -239,9 +239,7 @@ class OpenAIAgentsRunner:
         accumulated_text_parts: list[str],
     ) -> None:
         final_text = "".join(accumulated_text_parts)
-        OpenAIAgentsRunner._try_put(
-            queue, OutputEvent(conversation_id=conversation_id, text=final_text)
-        )
+        OpenAIAgentsRunner._try_put(queue, OutputEvent(conversation_id=conversation_id, text=final_text))
 
     # Note: log emission to stream is intentionally omitted to keep event order stable for tests.
 
