@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import time
 import uuid
 from collections.abc import Iterable
@@ -166,6 +167,14 @@ def build_runner_from_env() -> Runner:
     return EchoRunner()
 
 
+_should_exit = False
+
+
+def _handle_exit(signum: int, frame: Any) -> None:
+    global _should_exit
+    _should_exit = True
+
+
 def main() -> None:
     cfg = load_config()
     # Use consumer groups by default; allow disabling for simple local dev
@@ -184,22 +193,23 @@ def main() -> None:
         bus = RedisBus(redis_url=os.getenv("REDIS_URL"))
     runner: Runner = build_runner_from_env()
     worker = Worker(agent_name=cfg.agent_name, bus=bus, runner=runner)
-    # Simple loop: poll until interrupted
-    try:
-        # Option A fallback: small exponential backoff when no messages are processed
-        sleep_seconds = 0.05
-        max_sleep_seconds = 0.2
-        while True:
-            processed = worker.process_available(limit=100)
-            if processed == 0:
-                time.sleep(sleep_seconds)
-                # Exponential backoff with cap
-                sleep_seconds = min(max_sleep_seconds, sleep_seconds * 2)
-            else:
-                # Reset backoff after successful processing
-                sleep_seconds = 0.05
-    except KeyboardInterrupt:
-        pass
+    # Install graceful shutdown handlers (SIGTERM/SIGINT)
+    signal.signal(signal.SIGTERM, _handle_exit)
+    signal.signal(signal.SIGINT, _handle_exit)
+
+    # Simple loop: poll until exit is requested
+    # Keep exit latency bounded by Redis block (1s) and sleep intervals
+    sleep_seconds = 0.05
+    max_sleep_seconds = 0.2
+    while not _should_exit:
+        processed = worker.process_available(limit=100)
+        if processed == 0:
+            time.sleep(sleep_seconds)
+            # Exponential backoff with cap
+            sleep_seconds = min(max_sleep_seconds, sleep_seconds * 2)
+        else:
+            # Reset backoff after successful processing
+            sleep_seconds = 0.05
 
 
 if __name__ == "__main__":

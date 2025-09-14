@@ -214,7 +214,8 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 "tool": "terminal.run",
                 "attributes": {
                     "cwd": cwd or "",
-                    "command": command.split(" ")[0] if command else "",
+                    "command": (command.split(" ")[0] if command else ""),
+                    "args_len": len(command.split(" ")[1:]) if command else 0,
                 },
             },
         )
@@ -239,7 +240,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
             extra={
                 "event": "tool_success",
                 "tool": "terminal.run",
-                "metadata": _success_metadata(cwd, command, result),
+                "attributes": _success_metadata(cwd, command, result),
             },
         )
         duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0

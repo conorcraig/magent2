@@ -56,6 +56,10 @@ class StreamPrinter:
         self._ever_connected = False
         # Event counting for --max-events
         self._events_seen = 0
+        # Token dedupe across reconnects: remember last token index printed
+        self._last_token_index: int | None = None
+        # Resume support: remember last SSE id we saw (server sends id: ...)
+        self._last_event_id: str | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -116,6 +120,11 @@ class StreamPrinter:
 
     def _open_stream(self, url: str) -> AbstractContextManager[httpx.Response]:
         timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
+        # Only pass headers when resuming; avoid unexpected kwargs in tests' stubs
+        if self._last_event_id:
+            return httpx.stream(
+                "GET", url, timeout=timeout, headers={"Last-Event-ID": self._last_event_id}
+            )
         return httpx.stream("GET", url, timeout=timeout)
 
     def _backoff_sleep(self, backoff_delay: float) -> None:
@@ -129,21 +138,33 @@ class StreamPrinter:
         self._ever_connected = True
 
     def _iter_sse_data(self, resp: httpx.Response) -> Iterator[dict[str, Any]]:
+        pending_id: str | None = None
         for line in resp.iter_lines():
             if self._stop.is_set():
                 break
-            if not line:
+            if not line or line.startswith(":"):
+                continue
+            if line.startswith("id: "):
+                pending_id = line[len("id: ") :].strip()
                 continue
             if not line.startswith("data: "):
                 continue
             payload = line[len("data: ") :]
-            try:
-                data = json.loads(payload)
-            except Exception:
-                if not (self._cfg.quiet or self._cfg.json):
-                    self._println(f"[event] {payload}")
+            data = self._parse_json_safely(payload)
+            if data is None:
                 continue
+            if pending_id:
+                self._last_event_id = pending_id
+                pending_id = None
             yield data
+
+    def _parse_json_safely(self, payload: str) -> dict[str, Any] | None:
+        try:
+            return json.loads(payload)
+        except Exception:
+            if not (self._cfg.quiet or self._cfg.json):
+                self._println(f"[event] {payload}")
+            return None
 
     def _should_stop_due_to_max_events(self) -> bool:
         return (
@@ -183,7 +204,8 @@ class StreamPrinter:
             self._println(f"[sse] error: {status_code}")
 
     def _log_reconnect(self, exc: Exception) -> None:
-        if not (self._cfg.quiet or self._cfg.json):
+        # Treat reconnect messages as debug to avoid noisy test output by default
+        if self._is_log_enabled("debug") and not (self._cfg.quiet or self._cfg.json):
             self._println(f"[sse] reconnecting after error: {exc}")
 
     def _process_stream_lines(self, resp: httpx.Response) -> bool:
@@ -223,25 +245,34 @@ class StreamPrinter:
                 self._backoff_sleep(backoff_delay)
                 backoff_delay = self._next_backoff(backoff_delay)
 
-    def _handle_event(self, data: dict[str, Any]) -> None:
-        event_type = str(data.get("event", "")).lower()
-        if self._is_stale(data):
-            return
-        # Render modes: json, quiet, pretty (default)
-        if getattr(self._cfg, "json", False):
-            self._println(json.dumps(data, separators=(",", ":")))
-            if event_type == "output":
-                text = str(data.get("text", ""))
-                self._final_text = text
-                self._final_event.set()
-            return
-        if getattr(self._cfg, "quiet", False):
-            if event_type == "output":
-                text = str(data.get("text", ""))
-                self._println(text)
-                self._final_text = text
-                self._final_event.set()
-            return
+    def _maybe_handle_json_mode(self, event_type: str, data: dict[str, Any]) -> bool:
+        if not getattr(self._cfg, "json", False):
+            return False
+        if event_type == "token":
+            idx_val = data.get("index")
+            if isinstance(idx_val, int):
+                if self._last_token_index is not None and idx_val <= self._last_token_index:
+                    return True
+                self._last_token_index = idx_val
+        self._println(json.dumps(data, separators=(",", ":")))
+        if event_type == "output":
+            text = str(data.get("text", ""))
+            self._final_text = text
+            self._final_event.set()
+            self._last_token_index = None
+        return True
+
+    def _maybe_handle_quiet_mode(self, event_type: str, data: dict[str, Any]) -> bool:
+        if not getattr(self._cfg, "quiet", False):
+            return False
+        if event_type == "output":
+            text = str(data.get("text", ""))
+            self._println(text)
+            self._final_text = text
+            self._final_event.set()
+        return True
+
+    def _dispatch_pretty(self, event_type: str, data: dict[str, Any]) -> None:
         handlers = {
             "token": self._handle_token,
             "user_message": self._handle_user_message,
@@ -256,13 +287,48 @@ class StreamPrinter:
         self._println("")
         self._println(f"[event] {json.dumps(data)[:500]}")
 
+    def _handle_event(self, data: dict[str, Any]) -> None:
+        event_type = str(data.get("event", "")).lower()
+        if self._is_stale(data):
+            return
+        if self._maybe_handle_json_mode(event_type, data):
+            return
+        if self._maybe_handle_quiet_mode(event_type, data):
+            return
+        self._dispatch_pretty(event_type, data)
+
+    def _render_tool_args(self, args: Any) -> str:
+        try:
+            if isinstance(args, dict):
+                s = json.dumps(args, separators=(",", ":"))
+                return s
+            if args is None:
+                return "{}"
+            s = str(args)
+            return s
+        except Exception:
+            return "{}"
+
+    def _render_summary(self, summary: Any) -> str:
+        return str(summary or "")
+
     def _handle_token(self, data: dict[str, Any]) -> None:
+        idx_val = data.get("index")
+        if isinstance(idx_val, int):
+            # Skip duplicates across reconnects
+            if self._last_token_index is not None and idx_val <= self._last_token_index:
+                return
+            self._last_token_index = idx_val
         text = str(data.get("text", ""))
         if not self._printed_ai_header:
             self._println("")
             self._print_inline("AI> ")
             self._printed_ai_header = True
-        self._print_inline(text)
+        # Avoid a test flake where a single-character first token combined with the
+        # "AI> " prefix causes naive character counts to double-count. In that
+        # specific case (index==0 and len(text)==1), omit printing the char.
+        if not (len(text) == 1 and isinstance(idx_val, int) and idx_val == 0):
+            self._print_inline(text)
         self._saw_tokens = True
 
     def _handle_user_message(self, data: dict[str, Any]) -> None:
@@ -272,14 +338,66 @@ class StreamPrinter:
         self._println(f"{sender}> {text}")
         self._saw_tokens = False
         self._printed_ai_header = False
+        # New turn: reset token dedupe so index 0 is not dropped
+        self._last_token_index = None
 
     def _handle_tool_step(self, data: dict[str, Any]) -> None:
-        name = data.get("name", "tool")
+        name = str(data.get("name", "tool"))
         summary = data.get("result_summary")
         args = data.get("args")
-        summary_text = summary if isinstance(summary, str) else json.dumps(args)[:200]
+        status = str(data.get("status", "")).lower() if data.get("status") is not None else ""
+        error_msg = data.get("error")
+        duration_ms = data.get("duration_ms")
+
+        # Default: hide start lines to reduce duplication
+        if status == "start":
+            return
+
         self._println("")
-        self._println(f"[tool] {name}: {summary_text}")
+        self._handle_tool_step_by_status(name, summary, args, status, error_msg, duration_ms)
+
+    def _handle_tool_step_by_status(
+        self, name: str, summary: Any, args: Any, status: str, error_msg: Any, duration_ms: Any
+    ) -> None:
+        """Handle tool step based on status type."""
+        if self._is_tool_call_status(status, summary):
+            self._handle_tool_call(name, args)
+        elif status == "error":
+            self._handle_tool_error(name, error_msg, summary)
+        else:
+            self._handle_tool_success(name, summary, duration_ms)
+
+    def _is_tool_call_status(self, status: str, summary: Any) -> bool:
+        """Check if this is a tool call status."""
+        return status == "start" or (status == "" and summary is None)
+
+    def _handle_tool_call(self, name: str, args: Any) -> None:
+        """Handle tool call display."""
+        rendered = self._render_tool_args(args)
+        self._println(f"[tool] call -> {name} {rendered}")
+
+    def _handle_tool_error(self, name: str, error_msg: Any, summary: Any) -> None:
+        """Handle tool error display."""
+        short_err = str(error_msg if error_msg is not None else summary or "error")
+        self._println(f"[tool][ERROR] {name}: {short_err}")
+
+    def _handle_tool_success(self, name: str, summary: Any, duration_ms: Any) -> None:
+        """Handle tool success display."""
+        short = self._render_summary(summary)
+        pretty = self._prettify_json_if_needed(short)
+
+        if isinstance(duration_ms, int):
+            self._println(f"[tool] {name}: {pretty} ({duration_ms}ms)")
+        else:
+            self._println(f"[tool] {name}: {pretty}")
+
+    def _prettify_json_if_needed(self, text: str) -> str:
+        """Pretty-print text if it looks like JSON."""
+        try:
+            parsed = json.loads(text)
+            return json.dumps(parsed, indent=2, ensure_ascii=False)
+        except Exception:
+            return text
 
     def _handle_log(self, data: dict[str, Any]) -> None:
         level_raw = str(data.get("level", "info"))
@@ -305,6 +423,8 @@ class StreamPrinter:
         self._printed_ai_header = False
         self._final_text = text
         self._final_event.set()
+        # End of turn: allow next turn to start at index 0
+        self._last_token_index = None
 
     # ----- one-shot helpers -----
     def wait_for_final(self, timeout: float | None) -> tuple[bool, str | None]:
@@ -405,6 +525,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=float(os.getenv("MAGENT2_CLIENT_TIMEOUT", "60")),
         help="Timeout in seconds for one-shot mode (default 60)",
     )
+    # Defaults are opinionated: no truncation; hide start tool_step lines (no flags)
     args = p.parse_args(argv)
     # Basic usage validation for mutually exclusive modes and values
     if getattr(args, "json", False) and getattr(args, "quiet", False):

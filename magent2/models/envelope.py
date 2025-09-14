@@ -47,6 +47,11 @@ class ToolStepEvent(BaseStreamEvent):
     name: str
     args: dict[str, Any] = Field(default_factory=dict)
     result_summary: str | None = None
+    # Optional richer fields for UI/observability; backward compatible
+    status: Literal["start", "success", "error"] | None = None
+    error: str | None = None
+    duration_ms: int | None = None
+    tool_call_id: str | None = None
 
 
 class OutputEvent(BaseStreamEvent):

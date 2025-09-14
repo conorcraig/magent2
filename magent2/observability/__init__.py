@@ -67,6 +67,7 @@ def _add_standard_extras(payload: dict[str, Any], record: logging.LogRecord) -> 
         "trace_id",
         "request_id",
         "attributes",
+        "metadata",
     ):
         if hasattr(record, attr):
             payload[attr] = getattr(record, attr)

@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -213,7 +213,12 @@ def create_app(bus: Bus) -> FastAPI:
         return {"status": "ok", "topic": conv_topic}
 
     @app.get("/stream/{conversation_id}")
-    async def stream(conversation_id: str, max_events: int | None = None) -> Response:
+    async def stream(
+        conversation_id: str,
+        request: Request,
+        max_events: int | None = None,
+        last_id: str | None = None,
+    ) -> Response:
         """Server‑Sent Events stream for a conversation.
 
         Semantics:
@@ -228,7 +233,7 @@ def create_app(bus: Bus) -> FastAPI:
         topic = f"stream:{conversation_id}"
 
         async def event_gen() -> Any:
-            last_id: str | None = None
+            cursor: str | None = last_id or request.headers.get("Last-Event-ID") or None
             sent = 0
             cap = _sse_cap_bytes()
             # Detect if the underlying bus supports blocking reads (e.g., Redis consumer groups)
@@ -240,17 +245,22 @@ def create_app(bus: Bus) -> FastAPI:
             except Exception:
                 blocking_supported = False
             # Simple polling loop over Bus.read
+            import time as _time
+
+            last_hb = _time.monotonic()
             while True:
                 items = await asyncio.to_thread(
-                    lambda: list(bus.read(topic, last_id=last_id, limit=100))
+                    lambda: list(bus.read(topic, last_id=cursor, limit=100))
                 )
                 if items:
                     for m in items:
                         payload = m.payload
                         safe_payload = _truncate_payload_for_sse(payload, cap)
                         data = json.dumps(safe_payload, separators=(",", ":"))
+                        # Emit SSE id for resume support
+                        yield f"id: {m.id}\n"
                         yield f"data: {data}\n\n"
-                        last_id = m.id
+                        cursor = m.id
                         sent += 1
                         if max_events is not None and sent >= max_events:
                             return
@@ -258,6 +268,11 @@ def create_app(bus: Bus) -> FastAPI:
                     # avoid tight loop when no new items are available
                     if not blocking_supported:
                         await asyncio.sleep(0.02)
+                # Heartbeat every 15s to keep connections alive through proxies
+                now = _time.monotonic()
+                if now - last_hb >= 15.0:
+                    last_hb = now
+                    yield ":\n\n"
 
         logger.info(
             "gateway stream start",
@@ -265,10 +280,17 @@ def create_app(bus: Bus) -> FastAPI:
                 "event": "gateway_stream",
                 "service": "gateway",
                 "conversation_id": conversation_id,
+                "last_event_id": request.headers.get("Last-Event-ID") or last_id or "",
             },
         )
         metrics.increment("gateway_streams", {"conversation_id": conversation_id})
-        return StreamingResponse(event_gen(), media_type="text/event-stream")
+        sse_headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Hint for reverse proxies like Nginx to disable response buffering
+            "X-Accel-Buffering": "no",
+        }
+        return StreamingResponse(event_gen(), media_type="text/event-stream", headers=sse_headers)
 
     @app.get("/ready")
     async def ready() -> dict[str, str]:
