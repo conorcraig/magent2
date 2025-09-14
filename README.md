@@ -13,6 +13,8 @@ extend.
   transports.
 - Optional Gateway exposes HTTP POST for input and SSE for streaming output.
 
+See orchestration guidance: `docs/ORCHESTRATION.md`.
+
 ## Architecture
 
 ```mermaid
