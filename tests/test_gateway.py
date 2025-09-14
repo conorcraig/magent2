@@ -7,7 +7,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from magent2.bus.interface import Bus, BusMessage
+from magent2.bus.interface import BusMessage
 from magent2.models.envelope import MessageEnvelope
 from tests.helpers.bus import InMemoryBus
 

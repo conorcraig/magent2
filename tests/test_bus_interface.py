@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
-from magent2.bus.interface import Bus, BusMessage
+from magent2.bus.interface import BusMessage
 from tests.helpers.bus import InMemoryBus
 
 

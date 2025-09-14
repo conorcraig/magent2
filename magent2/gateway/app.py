@@ -128,7 +128,9 @@ def create_app(bus: Bus) -> FastAPI:
         payload = message.model_dump(mode="json")
         conv_topic = f"chat:{message.conversation_id}"
 
-        def _publish_or_503(topic: str, *, stage: str | None = None, extra: dict[str, Any] | None = None) -> None:
+        def _publish_or_503(
+            topic: str, *, stage: str | None = None, extra: dict[str, Any] | None = None
+        ) -> None:
             try:
                 bus.publish(topic, BusMessage(topic=topic, payload=payload))
             except Exception as exc:  # pragma: no cover - error path mapping

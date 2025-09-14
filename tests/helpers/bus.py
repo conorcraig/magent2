@@ -40,4 +40,3 @@ class InMemoryBus(Bus):
 
 
 __all__ = ["InMemoryBus"]
-

@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from magent2.bus.interface import Bus, BusMessage
-from magent2.observability import SENSITIVE_KEYS, get_run_context, redact
+from magent2.observability import get_run_context, redact
 
 _TEST_BUS: Bus | None = None
 _BUS_CACHE: Bus | None = None

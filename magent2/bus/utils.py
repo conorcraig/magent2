@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def compute_publish_topics(recipient: str, conversation_id: str) -> list[str]:
@@ -20,4 +20,3 @@ def compute_publish_topics(recipient: str, conversation_id: str) -> list[str]:
 
 
 __all__: Iterable[str] = ["compute_publish_topics"]
-
