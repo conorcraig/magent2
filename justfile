@@ -69,6 +69,17 @@ update:
 test:
 	uv run --isolated pytest -q
 
+run_tui:
+	# Ensure Docker stack is running before launching the Rust TUI
+	@printf "\033[1;36m==> Ensuring gateway stack is up\033[0m\n"
+	@docker compose up -d redis gateway worker
+	@if [ ! -f chat_tui/Cargo.toml ]; then \
+	  printf "\033[1;31mchat_tui/Cargo.toml not found; nothing to launch\033[0m\n"; \
+	  exit 1; \
+	fi
+	@printf "\033[1;36m==> Launching Rust TUI\033[0m\n"
+	@cargo run --manifest-path chat_tui/Cargo.toml
+
 up +args:
 	docker compose up -d {{args}}
 

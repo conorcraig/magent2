@@ -26,14 +26,15 @@ Observer index toggles (see `magent2/observability/index.py` for details):
 
 ## Launching the TUI
 
-The recommended entry point is the project CLI:
+The recommended entry point is the Just recipe:
 
 ```bash
-magent2 run
+just run_tui
 ```
 
-When `chat_tui/` is present, this command builds and launches the Rust TUI.
-If the TUI is unavailable, the Python streaming client is used as a fallback.
+This recipe ensures the Docker stack (gateway, worker, Redis) is running before
+building and launching the Rust TUI. If the TUI crate is missing, the recipe
+exits with a helpful message so you can install it separately.
 
 To run the TUI directly from the crate:
 
@@ -52,7 +53,7 @@ The screen is split into three rows:
 
 1. **Session tabs** – show the current chat title and gateway status.
 2. **Main content** – chat transcript; optionally includes a conversations
-   panel on the left.
+   panel on the left and agents/graph panes on the right.
 3. **Input line** – compose the next user message.
 
 Each chat session maintains its own input buffer, message history, stream task
@@ -69,6 +70,23 @@ hides the panel.
 Refreshing (`r`) re-fetches the list while preserving the selection when
 possible.
 
+### Agents pane
+
+Press `a` to display the agents pane on the right-hand side. The pane polls
+`GET /agents` roughly every three seconds, listing each agent’s active run
+count, last-seen age, and the number of recent conversations tracked by the
+observer index. When the index is disabled or empty, the pane shows placeholder
+text instead of failing the UI.
+
+### Conversation graph pane
+
+Press `g` to show a per-conversation graph summary beside the chat view. When
+enabled, the pane fetches `GET /graph/{conversation_id}` for the active chat
+and refreshes it on session changes or roughly every five seconds. Nodes and
+edges are rendered as a compact ASCII summary; large graphs are truncated after
+120 edges with a rollover count. Missing or stale data is surfaced as a pane
+message rather than interrupting the chat flow.
+
 ## Keybindings
 
 | Binding            | Action |
@@ -80,6 +98,8 @@ possible.
 | `Esc`              | Quit the TUI (restores the terminal state). |
 | `c`                | Toggle the conversations panel. |
 | `r`                | Refresh conversations while the panel is visible. |
+| `a`                | Toggle the agents pane (auto-refreshes every ~3 s). |
+| `g`                | Toggle the conversation graph pane (refreshes on session change / every ~5 s). |
 | `Up` / `Down`      | Scroll chat or move selection in the panel. |
 | `PageUp` / `PageDown` | Scroll chat faster or jump the panel selection by 10. |
 | `Ctrl+L`           | Clear the current session transcript. |
@@ -99,14 +119,17 @@ display scrollback before entering the alternate screen.
   replayed.
 - If the gateway is unreachable, the transcript logs a `[error] gateway unreachable`
   line instead of attempting the send.
+- While awaiting the first token or during tool execution, the input footer
+  shows a dot-based spinner and status message. The indicator clears on the
+  next model token, stream completion, or error.
 
 Agent replies are rendered with Markdown-aware formatting (lists, paragraphs),
 and tool messages are styled distinctly.
 
 ## Observer API overview
 
-The observer index powers the conversations panel and upcoming panes (agents,
-conversation graph). The gateway exposes three read-only endpoints:
+The observer index powers the conversations panel, agents pane, and conversation
+graph pane. The gateway exposes three read-only endpoints:
 
 - `GET /conversations?limit=50&since_ms=<ts>`
   - Response: `{ "conversations": [ { "id": str, "last_activity_ms": int, "participants_count": int, "msg_count": int } ] }`

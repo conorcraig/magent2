@@ -243,15 +243,16 @@ Environment:
 After syncing deps, the CLI provides simple workflows:
 
 ```bash
-# Ensure Docker stack (redis, gateway, worker)
-magent2 ensure
-
 # Launch the Rust TUI (ensures stack if needed)
 just run_tui
 
-# Launch Python client directly (no Docker ensure)
+# Launch Python client directly (headless streaming client)
 magent2 client --base-url auto --agent DevAgent
 ```
+
+> **Note:** the legacy `magent2` CLI entry point is temporarily a placeholder
+> while we design headless automation workflows. Track progress in
+> issue #159.
 
 Environment variables:
 
@@ -284,6 +285,8 @@ Notes:
 
 - Use `just run_tui` to spin up the stack and launch the Rust TUI when `chat_tui/`
   is present.
+- The `magent2` CLI entry point is under redesign (see issue #159) and currently
+  only exposes the streaming client directly.
 
 ## Configuration
 

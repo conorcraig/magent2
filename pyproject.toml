@@ -73,4 +73,3 @@ dev = [
 
 [project.scripts]
 magent2-client = "magent2.client.cli:main"
-magent2 = "magent2.cli:main"
