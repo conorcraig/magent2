@@ -47,6 +47,15 @@ check:
 	# Tests (quiet console output, full log available)
 	@printf "\033[1;36m==> Pytest\033[0m\n"
 	@uv run --isolated pytest -q --color=yes --durations=10 --junitxml=reports/pytest-junit.xml |& tee reports/pytest.log | sed -E '/^Installed [0-9]+ packages in /d'
+	# Rust: fmt and clippy for chat_tui (if cargo is available)
+	@if command -v cargo >/dev/null 2>&1; then \
+	  printf "\033[1;36m==> Rust: cargo fmt (check)\033[0m\n"; \
+	  cargo fmt --manifest-path chat_tui/Cargo.toml --all -- --check || true; \
+	  printf "\033[1;36m==> Rust: cargo clippy (-D warnings)\033[0m\n"; \
+	  cargo clippy --manifest-path chat_tui/Cargo.toml -- -D warnings; \
+	else \
+	  printf "\033[1;33m==> Skipping Rust checks (cargo not found)\033[0m\n"; \
+	fi
 
 update:
 	# Update all baselines in one go

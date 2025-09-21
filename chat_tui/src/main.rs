@@ -22,7 +22,8 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use reqwest::Client;
 use futures_util::StreamExt;
-use serde_json;
+// serde_json used via fully qualified path in parsing; no direct import needed
+use pulldown_cmark::{Event as MdEvent, Options as MdOptions, Parser as MdParser, Tag, TagEnd};
 
 // UI event bus carrying structured events to the render loop.
 enum UiEvent {
@@ -218,26 +219,48 @@ async fn main() -> std::io::Result<()> {
 async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
     match key.code {
         KeyCode::Char(c) => {
+            // Handle control combos first
+            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+                if c == 'l' {
+                    if let Some(session) = app.sessions.get_mut(app.active) {
+                        session.messages.clear();
+                        session.scroll = 0;
+                    }
+                    return false;
+                }
+                if c == 'u' {
+                    if let Some(session) = app.sessions.get_mut(app.active) {
+                        session.input.clear();
+                    }
+                    return false;
+                }
+            }
+
+            // Plain-character shortcuts
+            if c == 'c' {
+                app.show_conversations = !app.show_conversations;
+                if app.show_conversations {
+                    let list = fetch_conversations(&app.base_url).await;
+                    app.conversations = list;
+                    app.conversations_selected = 0;
+                }
+                return false;
+            }
+            if c == 'r' {
+                if app.show_conversations {
+                    let list = fetch_conversations(&app.base_url).await;
+                    app.conversations = list;
+                    if app.conversations_selected >= app.conversations.len() {
+                        if app.conversations.is_empty() { app.conversations_selected = 0; }
+                        else { app.conversations_selected = app.conversations.len().saturating_sub(1); }
+                    }
+                }
+                return false;
+            }
+
+            // Default: append to input
             if let Some(session) = app.sessions.get_mut(app.active) {
                 session.input.push(c);
-            }
-        }
-        KeyCode::Char('c') => {
-            app.show_conversations = !app.show_conversations;
-            if app.show_conversations {
-                let list = fetch_conversations(&app.base_url).await;
-                app.conversations = list;
-                app.conversations_selected = 0;
-            }
-        }
-        KeyCode::Char('r') => {
-            if app.show_conversations {
-                let list = fetch_conversations(&app.base_url).await;
-                app.conversations = list;
-                if app.conversations_selected >= app.conversations.len() {
-                    if app.conversations.is_empty() { app.conversations_selected = 0; }
-                    else { app.conversations_selected = app.conversations.len().saturating_sub(1); }
-                }
             }
         }
         KeyCode::Backspace => {
@@ -328,8 +351,8 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                                             if b == b'\n' {
                                                 if let Ok(line) = String::from_utf8(buf.clone()) {
                                                     let s = line.trim_end_matches('\r');
-                                                    if s.starts_with("id: ") {
-                                                        let id = s[4..].trim().to_string();
+                                                    if let Some(stripped) = s.strip_prefix("id: ") {
+                                                        let id = stripped.trim().to_string();
                                                         let _ = tx.send(UiEvent::SetLastId { idx, gen, id });
                                                     } else {
                                                         handle_sse_line(&line, idx, gen, &tx);
@@ -350,6 +373,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 // Store handle so we can abort next time
                 if let Some(session2) = app.sessions.get_mut(idx) { session2.stream_task = Some(handle); }
                 }
+            }
             }
         }
         KeyCode::Tab => {
@@ -401,17 +425,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 session.scroll = session.scroll.saturating_add(10);
             }
         }
-        KeyCode::Char('l') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
-                session.messages.clear();
-                session.scroll = 0;
-            }
-        }
-        KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
-                session.input.clear();
-            }
-        }
+        // Ctrl+L and Ctrl+U handled in the Char(c) branch above
         KeyCode::Esc => {
             return true;
         }
@@ -484,7 +498,7 @@ fn render_ui(f: &mut Frame, app: &AppState) {
     };
 
     if let Some(session) = app.sessions.get(app.active) {
-        // Styled chat rendering
+        // Styled chat rendering with Markdown-aware content (basic lists/paragraphs)
         let mut lines: Vec<Line> = Vec::with_capacity(session.messages.len() + 1);
         for msg in &session.messages {
             let (label, style) = match msg.speaker {
@@ -492,10 +506,52 @@ fn render_ui(f: &mut Frame, app: &AppState) {
                 Speaker::Model => ("AI: ", Style::default().fg(Color::Yellow)),
                 Speaker::Tool => ("Tool: ", Style::default().fg(Color::Magenta)),
             };
-            let mut spans: Vec<Span> = Vec::with_capacity(2);
-            spans.push(Span::styled(label, style));
-            spans.push(Span::raw(&msg.content));
-            lines.push(Line::from(spans));
+
+            let mut opts = MdOptions::empty();
+            opts.insert(MdOptions::ENABLE_TABLES);
+            opts.insert(MdOptions::ENABLE_FOOTNOTES);
+            let parser = MdParser::new_ext(&msg.content, opts);
+
+            let indent = " ".repeat(label.len());
+            let mut first_line = true;
+            let mut in_item = false;
+            let mut current = String::new();
+
+            let push_current = |lines: &mut Vec<Line>, first_line: &mut bool, current: &mut String, in_item: bool| {
+                if current.is_empty() { return; }
+                let mut spans: Vec<Span> = Vec::new();
+                if *first_line { spans.push(Span::styled(label, style)); } else { spans.push(Span::raw(indent.clone())); }
+                if in_item { spans.push(Span::raw("• ")); }
+                spans.push(Span::raw(current.clone()));
+                lines.push(Line::from(spans));
+                current.clear();
+                *first_line = false;
+            };
+
+            for ev in parser {
+                match ev {
+                    MdEvent::Start(Tag::Item) => {
+                        if !current.is_empty() { push_current(&mut lines, &mut first_line, &mut current, in_item); }
+                        in_item = true;
+                    }
+                    MdEvent::End(TagEnd::Item) => {
+                        push_current(&mut lines, &mut first_line, &mut current, in_item);
+                        in_item = false;
+                    }
+                    MdEvent::SoftBreak | MdEvent::HardBreak => {
+                        push_current(&mut lines, &mut first_line, &mut current, in_item);
+                    }
+                    MdEvent::Text(t) | MdEvent::Code(t) => {
+                        if !current.is_empty() { current.push(' '); }
+                        current.push_str(&t);
+                    }
+                    MdEvent::Start(Tag::Paragraph) | MdEvent::End(TagEnd::Paragraph) => {
+                        push_current(&mut lines, &mut first_line, &mut current, in_item);
+                    }
+                    _ => {}
+                }
+            }
+            if !current.is_empty() { push_current(&mut lines, &mut first_line, &mut current, in_item); }
         }
         let paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -532,8 +588,8 @@ fn spawn_sse_task(
                                 if b == b'\n' {
                                     if let Ok(line) = String::from_utf8(buf.clone()) {
                                         let s = line.trim_end_matches('\r');
-                                        if s.starts_with("id: ") {
-                                            let id = s[4..].trim().to_string();
+                                        if let Some(stripped) = s.strip_prefix("id: ") {
+                                            let id = stripped.trim().to_string();
                                             let _ = tx.send(UiEvent::SetLastId { idx, gen, id });
                                         } else {
                                             handle_sse_line(&line, idx, gen, &tx);
@@ -581,7 +637,7 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         // Best-effort terminal restore on panic
         let _ = disable_terminal_features();
-        let _ = ratatui::restore();
+        ratatui::restore();
         eprintln!("panic: {}", info);
     }));
 }
