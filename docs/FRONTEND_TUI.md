@@ -61,18 +61,21 @@ and last SSE event ID.
 
 ### Conversations panel
 
-Press `c` to toggle the conversations list. When visible, the panel queries
+Press `Ctrl+C` to toggle the conversations list. When visible, the panel queries
 `GET /conversations` and displays up to 50 recent conversation IDs. Selecting
 an item and pressing `Enter` clears the current transcript, starts streaming
 from `/stream/{conversation_id}` (using `Last-Event-ID` when available), and
-hides the panel.
+hides the panel. Use `Shift+Tab` to toggle focus between the input footer and
+the conversations pane. Active panes add `[FOCUS]` to their titles and brighten
+the border so you always know where navigation keys will land. Printable
+characters always append to the input buffer regardless of focus.
 
-Refreshing (`r`) re-fetches the list while preserving the selection when
+Refreshing (`Ctrl+R`) re-fetches the list while preserving the selection when
 possible.
 
 ### Agents pane
 
-Press `a` to display the agents pane on the right-hand side. The pane polls
+Press `Ctrl+A` to display the agents pane on the right-hand side. The pane polls
 `GET /agents` roughly every three seconds, listing each agent’s active run
 count, last-seen age, and the number of recent conversations tracked by the
 observer index. When the index is disabled or empty, the pane shows placeholder
@@ -80,7 +83,7 @@ text instead of failing the UI.
 
 ### Conversation graph pane
 
-Press `g` to show a per-conversation graph summary beside the chat view. When
+Press `Ctrl+G` to show a per-conversation graph summary beside the chat view. When
 enabled, the pane fetches `GET /graph/{conversation_id}` for the active chat
 and refreshes it on session changes or roughly every five seconds. Nodes and
 edges are rendered as a compact ASCII summary; large graphs are truncated after
@@ -94,20 +97,25 @@ message rather than interrupting the chat flow.
 | `Tab`              | Switch to the next chat session. |
 | `F2`               | Open a new chat session. |
 | `Enter`            | Send the current input (when the conversations panel is hidden). |
-| `Enter` (with panel) | Load the highlighted conversation and begin streaming. |
+| `Enter` (with pane) | Load the highlighted conversation and begin streaming (pane must be focused). |
 | `Esc`              | Quit the TUI (restores the terminal state). |
-| `c`                | Toggle the conversations panel. |
-| `r`                | Refresh conversations while the panel is visible. |
-| `a`                | Toggle the agents pane (auto-refreshes every ~3 s). |
-| `g`                | Toggle the conversation graph pane (refreshes on session change / every ~5 s). |
-| `Up` / `Down`      | Scroll chat or move selection in the panel. Leaving the bottom pauses follow mode. |
-| `PageUp` / `PageDown` | Scroll chat faster or jump the panel selection by 10; scrolling up pauses follow mode. |
+| `Ctrl+C`           | Toggle the conversations panel (focus moves to the panel when opened). |
+| `Ctrl+R`           | Refresh conversations while the panel is visible. |
+| `Shift+Tab`        | Toggle focus between the input field and conversations pane (when visible). |
+| `Ctrl+A`           | Toggle the agents pane (auto-refreshes every ~3 s). |
+| `Ctrl+G`           | Toggle the conversation graph pane (refreshes on session change / every ~5 s). |
+| `Up` / `Down`      | Scroll chat history or, when the conversations pane is focused, move its selection. Leaving the bottom pauses follow mode. |
+| `PageUp` / `PageDown` | Scroll chat faster or, with the pane focused, jump the selection by 10; scrolling up pauses follow mode. |
 | `End`              | Jump to the latest message and resume follow mode. |
 | `Ctrl+L`           | Clear the current session transcript. |
 | `Ctrl+U`           | Clear the input buffer. |
 
 The TUI also supports paste events (Bracketed Paste mode) and preserves
 display scrollback before entering the alternate screen.
+
+When the input footer has focus, the terminal cursor (classic blinking block)
+is positioned at the next character slot inside the field so you can see where
+typing will appear.
 
 When follow mode is active (the default), new messages keep the chat pinned to
 the bottom. Once you scroll away, the header shows “follow paused” until you

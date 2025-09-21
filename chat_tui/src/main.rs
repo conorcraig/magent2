@@ -18,6 +18,7 @@ use tokio::task::JoinHandle;
 // serde_json used via fully qualified path in parsing; no direct import needed
 use pulldown_cmark::{Event as MdEvent, Options as MdOptions, Parser as MdParser, Tag, TagEnd};
 use serde::Deserialize;
+use unicode_width::UnicodeWidthStr;
 
 const SPINNER_FRAMES: [&str; 4] = [".", "..", "...", ".."];
 const AGENTS_REFRESH_MS: u64 = 3_000;
@@ -122,6 +123,12 @@ struct GraphData {
     omitted_edges: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FocusTarget {
+    Input,
+    Conversations,
+}
+
 struct ChatSession {
     title: String,
     messages: Vec<Message>,
@@ -157,6 +164,7 @@ struct AppState {
     graph_for_conversation: Option<String>,
     graph_last_fetch: Option<Instant>,
     graph_error: Option<String>,
+    focus: FocusTarget,
 }
 
 impl ChatSession {
@@ -226,6 +234,7 @@ impl AppState {
             graph_for_conversation: None,
             graph_last_fetch: None,
             graph_error: None,
+            focus: FocusTarget::Input,
         }
     }
 }
@@ -465,105 +474,117 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
+    if !app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
+        app.focus = FocusTarget::Input;
+    }
     match key.code {
         KeyCode::Char(c) => {
             // Handle control combos first
             if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                if c == 'l' {
-                    if let Some(session) = app.sessions.get_mut(app.active) {
-                        session.messages.clear();
-                        session.scroll = 0;
-                        session.max_scroll = 0;
-                        session.follow = true;
+                match c {
+                    'l' => {
+                        if let Some(session) = app.sessions.get_mut(app.active) {
+                            session.messages.clear();
+                            session.scroll = 0;
+                            session.max_scroll = 0;
+                            session.follow = true;
+                        }
+                        return false;
                     }
-                    return false;
-                }
-                if c == 'u' {
-                    if let Some(session) = app.sessions.get_mut(app.active) {
-                        session.input.clear();
+                    'u' => {
+                        if let Some(session) = app.sessions.get_mut(app.active) {
+                            session.input.clear();
+                        }
+                        return false;
                     }
-                    return false;
-                }
-            }
-
-            // Plain-character shortcuts
-            if c == 'c' {
-                app.show_conversations = !app.show_conversations;
-                if app.show_conversations {
-                    let list = fetch_conversations(&app.base_url).await;
-                    app.conversations = list;
-                    app.conversations_selected = 0;
-                }
-                return false;
-            }
-            if c == 'r' {
-                if app.show_conversations {
-                    let list = fetch_conversations(&app.base_url).await;
-                    app.conversations = list;
-                    if app.conversations_selected >= app.conversations.len() {
-                        if app.conversations.is_empty() {
+                    'c' => {
+                        app.show_conversations = !app.show_conversations;
+                        if app.show_conversations {
+                            let list = fetch_conversations(&app.base_url).await;
+                            app.conversations = list;
                             app.conversations_selected = 0;
+                            app.focus = FocusTarget::Conversations;
                         } else {
-                            app.conversations_selected = app.conversations.len().saturating_sub(1);
+                            app.focus = FocusTarget::Input;
                         }
+                        return false;
                     }
-                }
-                return false;
-            }
-            if c == 'a' {
-                app.show_agents = !app.show_agents;
-                if app.show_agents {
-                    match fetch_agents(&app.base_url).await {
-                        Ok(rows) => {
-                            app.agents = rows;
-                            app.agents_error = None;
-                        }
-                        Err(err) => {
-                            app.agents_error = Some(err);
-                        }
-                    }
-                    app.agents_last_fetch = Some(Instant::now());
-                }
-                return false;
-            }
-            if c == 'g' {
-                app.show_graph = !app.show_graph;
-                if app.show_graph {
-                    app.graph = None;
-                    app.graph_error = None;
-                    app.graph_for_conversation = None;
-                    app.graph_last_fetch = None;
-                    let conversation_id = app
-                        .sessions
-                        .get(app.active)
-                        .and_then(|s| s.conversation_id.clone());
-                    if let Some(conv) = conversation_id {
-                        match fetch_graph(&app.base_url, &conv).await {
-                            Ok(graph) => {
-                                app.graph = Some(graph);
-                                app.graph_error = None;
-                            }
-                            Err(err) => {
-                                app.graph = None;
-                                app.graph_error = Some(err);
+                    'r' => {
+                        if app.show_conversations {
+                            let list = fetch_conversations(&app.base_url).await;
+                            app.conversations = list;
+                            if app.conversations_selected >= app.conversations.len() {
+                                if app.conversations.is_empty() {
+                                    app.conversations_selected = 0;
+                                } else {
+                                    app.conversations_selected =
+                                        app.conversations.len().saturating_sub(1);
+                                }
                             }
                         }
-                        app.graph_for_conversation = Some(conv);
-                        app.graph_last_fetch = Some(Instant::now());
-                    } else {
-                        app.graph_error = Some(
-                            "No conversation yet. Send a message to populate graph.".to_string(),
-                        );
+                        return false;
                     }
-                } else {
-                    app.graph_error = None;
-                    app.graph_for_conversation = None;
-                    app.graph_last_fetch = None;
+                    'a' => {
+                        app.show_agents = !app.show_agents;
+                        if app.show_agents {
+                            match fetch_agents(&app.base_url).await {
+                                Ok(rows) => {
+                                    app.agents = rows;
+                                    app.agents_error = None;
+                                }
+                                Err(err) => {
+                                    app.agents_error = Some(err);
+                                }
+                            }
+                            app.agents_last_fetch = Some(Instant::now());
+                        }
+                        return false;
+                    }
+                    'g' => {
+                        app.show_graph = !app.show_graph;
+                        if app.show_graph {
+                            app.graph = None;
+                            app.graph_error = None;
+                            app.graph_for_conversation = None;
+                            app.graph_last_fetch = None;
+                            let conversation_id = app
+                                .sessions
+                                .get(app.active)
+                                .and_then(|s| s.conversation_id.clone());
+                            if let Some(conv) = conversation_id {
+                                match fetch_graph(&app.base_url, &conv).await {
+                                    Ok(graph) => {
+                                        app.graph = Some(graph);
+                                        app.graph_error = None;
+                                    }
+                                    Err(err) => {
+                                        app.graph = None;
+                                        app.graph_error = Some(err);
+                                    }
+                                }
+                                app.graph_for_conversation = Some(conv);
+                                app.graph_last_fetch = Some(Instant::now());
+                            } else {
+                                app.graph_error = Some(
+                                    "No conversation yet. Send a message to populate graph."
+                                        .to_string(),
+                                );
+                            }
+                        } else {
+                            app.graph_error = None;
+                            app.graph_for_conversation = None;
+                            app.graph_last_fetch = None;
+                        }
+                        return false;
+                    }
+                    _ => {}
                 }
-                return false;
             }
 
             // Default: append to input
+            if !matches!(app.focus, FocusTarget::Input) {
+                app.focus = FocusTarget::Input;
+            }
             if let Some(session) = app.sessions.get_mut(app.active) {
                 session.input.push(c);
             }
@@ -574,7 +595,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             }
         }
         KeyCode::Enter => {
-            if app.show_conversations {
+            if app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
                 // Switch to selected conversation and start SSE
                 if let Some(sel_id) = app.conversations.get(app.conversations_selected).cloned() {
                     let idx = app.active;
@@ -599,6 +620,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                             s.stream_task = Some(handle);
                         }
                         app.show_conversations = false;
+                        app.focus = FocusTarget::Input;
                     }
                 }
             } else {
@@ -775,6 +797,15 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
         }
         KeyCode::Tab => {
             app.active = (app.active + 1) % app.sessions.len();
+            app.focus = FocusTarget::Input;
+        }
+        KeyCode::BackTab => {
+            if app.show_conversations {
+                app.focus = match app.focus {
+                    FocusTarget::Input => FocusTarget::Conversations,
+                    FocusTarget::Conversations => FocusTarget::Input,
+                };
+            }
         }
         KeyCode::F(2) => {
             let new_idx = app.sessions.len() + 1;
@@ -793,9 +824,10 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 busy: None,
             });
             app.active = app.sessions.len() - 1;
+            app.focus = FocusTarget::Input;
         }
         KeyCode::Up => {
-            if app.show_conversations {
+            if app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
                 if app.conversations_selected > 0 {
                     app.conversations_selected -= 1;
                 }
@@ -807,7 +839,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             }
         }
         KeyCode::Down => {
-            if app.show_conversations {
+            if app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
                 let max = app.conversations.len().saturating_sub(1);
                 if app.conversations_selected < max {
                     app.conversations_selected += 1;
@@ -819,7 +851,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             }
         }
         KeyCode::PageUp => {
-            if app.show_conversations {
+            if app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
                 let dec = app.conversations_selected.saturating_sub(10);
                 app.conversations_selected = dec;
             } else if let Some(session) = app.sessions.get_mut(app.active) {
@@ -828,7 +860,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             }
         }
         KeyCode::PageDown => {
-            if app.show_conversations {
+            if app.show_conversations && matches!(app.focus, FocusTarget::Conversations) {
                 let max = app.conversations.len().saturating_sub(1);
                 app.conversations_selected = (app.conversations_selected + 10).min(max);
             } else if let Some(session) = app.sessions.get_mut(app.active) {
@@ -1000,24 +1032,6 @@ async fn fetch_graph(base_url: &str, conversation_id: &str) -> Result<GraphData,
     })
 }
 
-fn total_message_rows(lines: &[Line], max_width: usize) -> usize {
-    if lines.is_empty() {
-        return 0;
-    }
-    let effective_width = max_width.max(1);
-    lines
-        .iter()
-        .map(|line| {
-            let width = line.width();
-            if width == 0 {
-                1
-            } else {
-                (width + effective_width - 1) / effective_width
-            }
-        })
-        .sum()
-}
-
 fn render_ui(f: &mut Frame, app: &mut AppState) {
     let size = f.area();
     let chunks = Layout::default()
@@ -1064,11 +1078,22 @@ fn render_ui(f: &mut Frame, app: &mut AppState) {
             }
             out
         };
-        let conv = Paragraph::new(conv_text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Conversations (c to toggle)"),
-        );
+        let mut conv_title =
+            "Conversations (Ctrl+C toggle • Ctrl+R refresh • Shift+Tab focus)".to_string();
+        if matches!(app.focus, FocusTarget::Conversations) {
+            conv_title.push_str(" • [FOCUS]");
+        }
+        let mut conv_block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(conv_title));
+        if matches!(app.focus, FocusTarget::Conversations) {
+            conv_block = conv_block.border_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+        let conv = Paragraph::new(conv_text).block(conv_block);
         f.render_widget(conv, mid[0]);
         chat_area = mid[1];
     }
@@ -1156,42 +1181,43 @@ fn render_ui(f: &mut Frame, app: &mut AppState) {
                 push_current(&mut lines, &mut first_line, &mut current, in_item);
             }
         }
-        let inner_width = chat_area.width.saturating_sub(2) as usize;
-        let effective_width = inner_width.max(1);
+        let inner_width = chat_area.width.saturating_sub(2);
         let viewport_height = usize::from(chat_area.height.saturating_sub(2));
-        let total_rows = total_message_rows(&lines, effective_width);
-        let max_scroll = if viewport_height == 0 {
-            total_rows
-        } else if total_rows > viewport_height {
-            total_rows - viewport_height
-        } else {
+        let content_rows = if inner_width == 0 {
             0
+        } else {
+            Paragraph::new(lines.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(inner_width)
         };
+        let max_scroll = content_rows.saturating_sub(viewport_height);
         let clamped_max = max_scroll.min(u16::MAX as usize) as u16;
         session.viewport_height = viewport_height.min(u16::MAX as usize) as u16;
         session.max_scroll = clamped_max;
-        if session.follow {
-            session.scroll = session.max_scroll;
-        } else if session.scroll > session.max_scroll {
-            session.scroll = session.max_scroll;
-        }
+        session.scroll = if session.follow {
+            session.max_scroll
+        } else {
+            session.scroll.min(session.max_scroll)
+        };
 
         let mut chat_title = "Chat (PgUp/PgDn/Up/Down to scroll)".to_string();
         if !session.follow {
             chat_title.push_str(" — follow paused (End to resume)");
         }
 
-        let paragraph = Paragraph::new(lines)
+        let mut paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((session.scroll, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Line::from(chat_title)),
-            );
+            .scroll((session.scroll, 0));
+        paragraph = paragraph.block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(chat_title)),
+        );
         f.render_widget(paragraph, chat_area);
 
-        let mut input_title = "Input (Enter to send, Tab switch, F2 new, Esc quit)".to_string();
+        let mut input_title =
+            "Input (Enter send, Tab next session, F2 new, Shift+Tab focus panel, Esc quit)"
+                .to_string();
         if let Some(busy) = session.busy.as_ref() {
             let elapsed = busy.since.elapsed();
             let suffix = match &busy.reason {
@@ -1229,12 +1255,36 @@ fn render_ui(f: &mut Frame, app: &mut AppState) {
             input_title.push_str(" • ");
             input_title.push_str(&suffix);
         }
-        let input = Paragraph::new(session.input.clone()).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(Line::from(input_title)),
-        );
+        let mut input_block = Block::default().borders(Borders::ALL).title(Line::from(
+            if matches!(app.focus, FocusTarget::Input) {
+                let mut title = input_title.clone();
+                title.push_str(" • [FOCUS]");
+                title
+            } else {
+                input_title.clone()
+            },
+        ));
+        if matches!(app.focus, FocusTarget::Input) {
+            input_block = input_block.border_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+        let input = Paragraph::new(session.input.clone()).block(input_block);
         f.render_widget(input, chunks[2]);
+
+        if matches!(app.focus, FocusTarget::Input) {
+            let inner_x = chunks[2].x.saturating_add(1);
+            let inner_y = chunks[2].y.saturating_add(1);
+            let (cursor_col, cursor_row) =
+                cursor_position(&session.input, chunks[2].width.saturating_sub(2));
+            let cursor_x = inner_x.saturating_add(cursor_col);
+            let cursor_y = inner_y.saturating_add(cursor_row);
+            if cursor_y < chunks[2].y.saturating_add(chunks[2].height) {
+                f.set_cursor_position((cursor_x, cursor_y));
+            }
+        }
     }
 
     if let Some(side) = side_area {
@@ -1253,8 +1303,22 @@ fn render_ui(f: &mut Frame, app: &mut AppState) {
     }
 }
 
+fn cursor_position(input: &str, inner_width: u16) -> (u16, u16) {
+    if inner_width == 0 {
+        return (0, 0);
+    }
+    let available = inner_width as usize;
+    let last_line = input
+        .rsplit_once('\n')
+        .map(|(_, tail)| tail)
+        .unwrap_or(input);
+    let raw_col = last_line.width();
+    let capped_col = if available <= 1 { 0 } else { raw_col.min(available - 1) };
+    (capped_col.min(u16::MAX as usize) as u16, 0)
+}
+
 fn render_agents_panel(f: &mut Frame, area: Rect, app: &AppState) {
-    let mut title = format!("Agents ({}) • a to toggle", app.agents.len());
+    let mut title = format!("Agents ({}) • Ctrl+A toggle", app.agents.len());
     if app.agents_error.is_some() {
         title.push_str(" • last fetch error");
     }
@@ -1295,7 +1359,7 @@ fn render_agents_panel(f: &mut Frame, area: Rect, app: &AppState) {
 }
 
 fn render_graph_panel(f: &mut Frame, area: Rect, app: &AppState) {
-    let mut title = String::from("Conversation Graph • g to toggle");
+    let mut title = String::from("Conversation Graph • Ctrl+G toggle");
     if let Some(conv) = app.graph_for_conversation.as_deref() {
         title.push_str(" • ");
         title.push_str(&truncate_with_ellipsis(conv, 18));

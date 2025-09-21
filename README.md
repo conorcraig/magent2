@@ -277,7 +277,8 @@ Features:
 - Multi-session tabs (`Tab` to switch, `F2` new session)
 - Paste support and enhanced key handling
 - Streams from `/stream/{conversation_id}` and posts via `/send`
-- Conversations panel: `c` toggle, Up/Down/PageUp/PageDown to select, `r` refresh, `Enter` to switch (stops old SSE, starts new)
+- Conversations panel: `Ctrl+C` toggle, `Shift+Tab` focus, Up/Down/PageUp/PageDown to select (when focused), `Ctrl+R` refresh, `Enter` to switch (stops old SSE, starts new)
+- Focus indicators flag the active panel (`[FOCUS]` in titles) and the input footer shows the terminal cursor where typing will land
 - Markdown-aware rendering for agent messages (lists, paragraphs)
 - Toggle a tools pane (`F3`) that renders `tool_step` events (planned)
 
