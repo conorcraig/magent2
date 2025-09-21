@@ -1,27 +1,20 @@
 use std::io::{self, Write};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::process::Command;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{
-    self,
-    Event as CEvent,
-    KeyCode,
-    KeyEvent,
-    DisableBracketedPaste,
-    EnableBracketedPaste,
-    KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event as CEvent, KeyCode, KeyEvent,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use crossterm::{cursor, execute};
 use crossterm::terminal::ScrollUp;
+use crossterm::{cursor, execute};
+use futures_util::StreamExt;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
+use reqwest::Client;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use reqwest::Client;
-use futures_util::StreamExt;
 // serde_json used via fully qualified path in parsing; no direct import needed
 use pulldown_cmark::{Event as MdEvent, Options as MdOptions, Parser as MdParser, Tag, TagEnd};
 
@@ -54,7 +47,7 @@ struct ChatSession {
     last_sse_id: Option<String>,
     scroll: u16,
     stream_task: Option<JoinHandle<()>>, // abort previous SSE task on new send
-    conversation_id: Option<String>, // None until first send, then set to new id
+    conversation_id: Option<String>,     // None until first send, then set to new id
 }
 
 struct AppState {
@@ -97,7 +90,8 @@ impl AppState {
             tx,
             base_url,
             gateway_ok: false,
-            agent_name: std::env::var("MAGENT2_AGENT_NAME").unwrap_or_else(|_| "DevAgent".to_string()),
+            agent_name: std::env::var("MAGENT2_AGENT_NAME")
+                .unwrap_or_else(|_| "DevAgent".to_string()),
             show_conversations: false,
             conversations: Vec::new(),
             conversations_selected: 0,
@@ -125,7 +119,12 @@ async fn main() -> std::io::Result<()> {
         // Periodic gateway health probe (best-effort)
         if last_health.elapsed() >= Duration::from_millis(750) {
             let url = format!("{}/health", app.base_url);
-            let ok = match client.get(&url).timeout(Duration::from_millis(1200)).send().await {
+            let ok = match client
+                .get(&url)
+                .timeout(Duration::from_millis(1200))
+                .send()
+                .await
+            {
                 Ok(resp) => resp.status().is_success(),
                 Err(_) => false,
             };
@@ -137,14 +136,20 @@ async fn main() -> std::io::Result<()> {
                 UiEvent::User { idx, gen, text } => {
                     if let Some(session) = app.sessions.get_mut(idx) {
                         if gen == session.gen {
-                            session.messages.push(Message { speaker: Speaker::User, content: text });
+                            session.messages.push(Message {
+                                speaker: Speaker::User,
+                                content: text,
+                            });
                         }
                     }
                 }
                 UiEvent::Tool { idx, gen, text } => {
                     if let Some(session) = app.sessions.get_mut(idx) {
                         if gen == session.gen {
-                            session.messages.push(Message { speaker: Speaker::Tool, content: text });
+                            session.messages.push(Message {
+                                speaker: Speaker::Tool,
+                                content: text,
+                            });
                         }
                     }
                 }
@@ -156,10 +161,16 @@ async fn main() -> std::io::Result<()> {
                                 if matches!(last.speaker, Speaker::Model) {
                                     last.content.push_str(&text);
                                 } else {
-                                    session.messages.push(Message { speaker: Speaker::Model, content: text });
+                                    session.messages.push(Message {
+                                        speaker: Speaker::Model,
+                                        content: text,
+                                    });
                                 }
                             } else {
-                                session.messages.push(Message { speaker: Speaker::Model, content: text });
+                                session.messages.push(Message {
+                                    speaker: Speaker::Model,
+                                    content: text,
+                                });
                             }
                         }
                     }
@@ -173,10 +184,16 @@ async fn main() -> std::io::Result<()> {
                                 if matches!(last.speaker, Speaker::Model) {
                                     last.content = text;
                                 } else {
-                                    session.messages.push(Message { speaker: Speaker::Model, content: text });
+                                    session.messages.push(Message {
+                                        speaker: Speaker::Model,
+                                        content: text,
+                                    });
                                 }
                             } else {
-                                session.messages.push(Message { speaker: Speaker::Model, content: text });
+                                session.messages.push(Message {
+                                    speaker: Speaker::Model,
+                                    content: text,
+                                });
                             }
                         }
                     }
@@ -251,8 +268,11 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     let list = fetch_conversations(&app.base_url).await;
                     app.conversations = list;
                     if app.conversations_selected >= app.conversations.len() {
-                        if app.conversations.is_empty() { app.conversations_selected = 0; }
-                        else { app.conversations_selected = app.conversations.len().saturating_sub(1); }
+                        if app.conversations.is_empty() {
+                            app.conversations_selected = 0;
+                        } else {
+                            app.conversations_selected = app.conversations.len().saturating_sub(1);
+                        }
                     }
                 }
                 return false;
@@ -276,104 +296,150 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     if let Some(session) = app.sessions.get_mut(idx) {
                         session.gen = session.gen.saturating_add(1);
                         let gen = session.gen;
-                        if let Some(h) = session.stream_task.take() { h.abort(); }
+                        if let Some(h) = session.stream_task.take() {
+                            h.abort();
+                        }
                         session.last_sse_id = None;
                         session.messages.clear();
                         session.conversation_id = Some(sel_id.clone());
                         let handle = spawn_sse_task(
-                            app.base_url.clone(), idx, gen, app.tx.clone(), sel_id, None,
+                            app.base_url.clone(),
+                            idx,
+                            gen,
+                            app.tx.clone(),
+                            sel_id,
+                            None,
                         );
-                        if let Some(s) = app.sessions.get_mut(idx) { s.stream_task = Some(handle); }
+                        if let Some(s) = app.sessions.get_mut(idx) {
+                            s.stream_task = Some(handle);
+                        }
                         app.show_conversations = false;
                     }
                 }
             } else {
                 let idx = app.active;
                 if let Some(session) = app.sessions.get_mut(idx) {
-                let input = std::mem::take(&mut session.input);
-                // Increment generation to invalidate any prior stream tasks for this session
-                session.gen = session.gen.saturating_add(1);
-                let gen = session.gen;
-                let tx = app.tx.clone();
-                let base = app.base_url.clone();
-                // Allocate a new conversation id on first send if not set yet
-                if session.conversation_id.is_none() {
-                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-                    session.conversation_id = Some(format!("conv-{}", ts));
-                }
-                let conversation_id = session.conversation_id.clone().unwrap_or_else(|| format!("conv-{}_fallback", idx + 1));
-                // Abort any previous SSE task for this session to avoid duplicate streams
-                if let Some(handle) = session.stream_task.take() {
-                    handle.abort();
-                }
-                // Snapshot last id to resume from the correct position (avoid replaying history)
-                let resume_id = session.last_sse_id.clone();
-                let send_body = serde_json::json!({
-                    "conversation_id": conversation_id,
-                    "sender": "user:tui",
-                    "recipient": format!("agent:{}", app.agent_name),
-                    "type": "message",
-                    "content": input.clone(),
-                });
-                if !app.gateway_ok {
-                    let _ = tx.send(UiEvent::Tool { idx, gen, text: "[error] gateway unreachable".to_string() });
-                } else {
-                let handle = tokio::spawn(async move {
-                    let client = Client::new();
-                    match client.post(format!("{}/send", base)).json(&send_body).send().await {
-                        Ok(resp) => {
-                            if !resp.status().is_success() {
-                                let _ = tx.send(UiEvent::Tool { idx, gen, text: format!("[error] send failed: {}", resp.status()) });
-                                return;
-                            }
-                        }
-                        Err(_) => {
-                            let _ = tx.send(UiEvent::Tool { idx, gen, text: "[error] send failed".to_string() });
-                            return;
-                        }
+                    let input = std::mem::take(&mut session.input);
+                    // Increment generation to invalidate any prior stream tasks for this session
+                    session.gen = session.gen.saturating_add(1);
+                    let gen = session.gen;
+                    let tx = app.tx.clone();
+                    let base = app.base_url.clone();
+                    // Allocate a new conversation id on first send if not set yet
+                    if session.conversation_id.is_none() {
+                        let ts = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        session.conversation_id = Some(format!("conv-{}", ts));
                     }
-                    // Stream SSE line-by-line; handle data: JSON payloads
-                    let url = format!("{}/stream/{}", base, conversation_id);
-                    let mut req = client.get(&url);
-                    if let Some(id) = resume_id {
-                        if !id.is_empty() {
-                            req = req.header("Last-Event-ID", id);
-                        }
+                    let conversation_id = session
+                        .conversation_id
+                        .clone()
+                        .unwrap_or_else(|| format!("conv-{}_fallback", idx + 1));
+                    // Abort any previous SSE task for this session to avoid duplicate streams
+                    if let Some(handle) = session.stream_task.take() {
+                        handle.abort();
                     }
-                    if let Ok(resp) = req.send().await {
-                        if resp.status().is_success() {
-                            let mut bytes_stream = resp.bytes_stream();
-                            let mut buf: Vec<u8> = Vec::new();
-                            while let Some(item) = bytes_stream.next().await {
-                                match item {
-                                    Ok(chunk) => {
-                                        for b in chunk {
-                                            if b == b'\n' {
-                                                if let Ok(line) = String::from_utf8(buf.clone()) {
-                                                    let s = line.trim_end_matches('\r');
-                                                    if let Some(stripped) = s.strip_prefix("id: ") {
-                                                        let id = stripped.trim().to_string();
-                                                        let _ = tx.send(UiEvent::SetLastId { idx, gen, id });
-                                                    } else {
-                                                        handle_sse_line(&line, idx, gen, &tx);
-                                                    }
-                                                }
-                                                buf.clear();
-                                            } else {
-                                                buf.push(b);
-                                            }
-                                        }
+                    // Snapshot last id to resume from the correct position (avoid replaying history)
+                    let resume_id = session.last_sse_id.clone();
+                    let send_body = serde_json::json!({
+                        "conversation_id": conversation_id,
+                        "sender": "user:tui",
+                        "recipient": format!("agent:{}", app.agent_name),
+                        "type": "message",
+                        "content": input.clone(),
+                    });
+                    if !app.gateway_ok {
+                        let _ = tx.send(UiEvent::Tool {
+                            idx,
+                            gen,
+                            text: "[error] gateway unreachable".to_string(),
+                        });
+                    } else {
+                        let handle = tokio::spawn(async move {
+                            let client = Client::new();
+                            match client
+                                .post(format!("{}/send", base))
+                                .json(&send_body)
+                                .send()
+                                .await
+                            {
+                                Ok(resp) => {
+                                    if !resp.status().is_success() {
+                                        let _ = tx.send(UiEvent::Tool {
+                                            idx,
+                                            gen,
+                                            text: format!("[error] send failed: {}", resp.status()),
+                                        });
+                                        return;
                                     }
-                                    Err(_) => break,
+                                }
+                                Err(_) => {
+                                    let _ = tx.send(UiEvent::Tool {
+                                        idx,
+                                        gen,
+                                        text: "[error] send failed".to_string(),
+                                    });
+                                    return;
                                 }
                             }
+                            // Stream SSE line-by-line; handle data: JSON payloads
+                            let url = format!("{}/stream/{}", base, conversation_id);
+                            let mut req = client.get(&url);
+                            if let Some(id) = resume_id {
+                                if !id.is_empty() {
+                                    req = req.header("Last-Event-ID", id);
+                                }
+                            }
+                            if let Ok(resp) = req.send().await {
+                                if resp.status().is_success() {
+                                    let mut bytes_stream = resp.bytes_stream();
+                                    let mut buf: Vec<u8> = Vec::new();
+                                    while let Some(item) = bytes_stream.next().await {
+                                        match item {
+                                            Ok(chunk) => {
+                                                for b in chunk {
+                                                    if b == b'\n' {
+                                                        if let Ok(line) =
+                                                            String::from_utf8(buf.clone())
+                                                        {
+                                                            let s = line.trim_end_matches('\r');
+                                                            if let Some(stripped) =
+                                                                s.strip_prefix("id: ")
+                                                            {
+                                                                let id =
+                                                                    stripped.trim().to_string();
+                                                                let _ =
+                                                                    tx.send(UiEvent::SetLastId {
+                                                                        idx,
+                                                                        gen,
+                                                                        id,
+                                                                    });
+                                                            } else {
+                                                                handle_sse_line(
+                                                                    &line, idx, gen, &tx,
+                                                                );
+                                                            }
+                                                        }
+                                                        buf.clear();
+                                                    } else {
+                                                        buf.push(b);
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        // Store handle so we can abort next time
+                        if let Some(session2) = app.sessions.get_mut(idx) {
+                            session2.stream_task = Some(handle);
                         }
                     }
-                });
-                // Store handle so we can abort next time
-                if let Some(session2) = app.sessions.get_mut(idx) { session2.stream_task = Some(handle); }
                 }
-            }
             }
         }
         KeyCode::Tab => {
@@ -395,15 +461,21 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
         }
         KeyCode::Up => {
             if app.show_conversations {
-                if app.conversations_selected > 0 { app.conversations_selected -= 1; }
+                if app.conversations_selected > 0 {
+                    app.conversations_selected -= 1;
+                }
             } else if let Some(session) = app.sessions.get_mut(app.active) {
-                if session.scroll > 0 { session.scroll -= 1; }
+                if session.scroll > 0 {
+                    session.scroll -= 1;
+                }
             }
         }
         KeyCode::Down => {
             if app.show_conversations {
                 let max = app.conversations.len().saturating_sub(1);
-                if app.conversations_selected < max { app.conversations_selected += 1; }
+                if app.conversations_selected < max {
+                    app.conversations_selected += 1;
+                }
             } else if let Some(session) = app.sessions.get_mut(app.active) {
                 // naive increment; rendering will clamp visually
                 session.scroll = session.scroll.saturating_add(1);
@@ -460,18 +532,24 @@ fn render_ui(f: &mut Frame, app: &AppState) {
     let size = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(5), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(3),
+        ])
         .split(size);
 
-    let titles: Vec<Line> = app.sessions.iter().map(|s| Line::from(s.title.as_str())).collect();
+    let titles: Vec<Line> = app
+        .sessions
+        .iter()
+        .map(|s| Line::from(s.title.as_str()))
+        .collect();
     let status = if app.gateway_ok { "ok" } else { "down" };
-    let tabs = Tabs::new(titles)
-        .select(app.active)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(Line::from(format!("Sessions • Gateway: {}", status))),
-        );
+    let tabs = Tabs::new(titles).select(app.active).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(format!("Sessions • Gateway: {}", status))),
+    );
     f.render_widget(tabs, chunks[0]);
 
     // Optionally split middle area to show conversations list on the left
@@ -480,17 +558,26 @@ fn render_ui(f: &mut Frame, app: &AppState) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(28), Constraint::Min(5)])
             .split(chunks[1]);
-        let conv_text = if app.conversations.is_empty() { "(no conversations)".to_string() } else {
+        let conv_text = if app.conversations.is_empty() {
+            "(no conversations)".to_string()
+        } else {
             let mut out = String::new();
             for (i, id) in app.conversations.iter().enumerate() {
-                if i == app.conversations_selected { out.push_str("> "); } else { out.push_str("  "); }
+                if i == app.conversations_selected {
+                    out.push_str("> ");
+                } else {
+                    out.push_str("  ");
+                }
                 out.push_str(id);
                 out.push('\n');
             }
             out
         };
-        let conv = Paragraph::new(conv_text)
-            .block(Block::default().borders(Borders::ALL).title("Conversations (c to toggle)"));
+        let conv = Paragraph::new(conv_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Conversations (c to toggle)"),
+        );
         f.render_widget(conv, mid[0]);
         mid[1]
     } else {
@@ -517,11 +604,22 @@ fn render_ui(f: &mut Frame, app: &AppState) {
             let mut in_item = false;
             let mut current = String::new();
 
-            let push_current = |lines: &mut Vec<Line>, first_line: &mut bool, current: &mut String, in_item: bool| {
-                if current.is_empty() { return; }
+            let push_current = |lines: &mut Vec<Line>,
+                                first_line: &mut bool,
+                                current: &mut String,
+                                in_item: bool| {
+                if current.is_empty() {
+                    return;
+                }
                 let mut spans: Vec<Span> = Vec::new();
-                if *first_line { spans.push(Span::styled(label, style)); } else { spans.push(Span::raw(indent.clone())); }
-                if in_item { spans.push(Span::raw("• ")); }
+                if *first_line {
+                    spans.push(Span::styled(label, style));
+                } else {
+                    spans.push(Span::raw(indent.clone()));
+                }
+                if in_item {
+                    spans.push(Span::raw("• "));
+                }
                 spans.push(Span::raw(current.clone()));
                 lines.push(Line::from(spans));
                 current.clear();
@@ -531,7 +629,9 @@ fn render_ui(f: &mut Frame, app: &AppState) {
             for ev in parser {
                 match ev {
                     MdEvent::Start(Tag::Item) => {
-                        if !current.is_empty() { push_current(&mut lines, &mut first_line, &mut current, in_item); }
+                        if !current.is_empty() {
+                            push_current(&mut lines, &mut first_line, &mut current, in_item);
+                        }
                         in_item = true;
                     }
                     MdEvent::End(TagEnd::Item) => {
@@ -542,7 +642,9 @@ fn render_ui(f: &mut Frame, app: &AppState) {
                         push_current(&mut lines, &mut first_line, &mut current, in_item);
                     }
                     MdEvent::Text(t) | MdEvent::Code(t) => {
-                        if !current.is_empty() { current.push(' '); }
+                        if !current.is_empty() {
+                            current.push(' ');
+                        }
                         current.push_str(&t);
                     }
                     MdEvent::Start(Tag::Paragraph) | MdEvent::End(TagEnd::Paragraph) => {
@@ -551,15 +653,25 @@ fn render_ui(f: &mut Frame, app: &AppState) {
                     _ => {}
                 }
             }
-            if !current.is_empty() { push_current(&mut lines, &mut first_line, &mut current, in_item); }
+            if !current.is_empty() {
+                push_current(&mut lines, &mut first_line, &mut current, in_item);
+            }
         }
         let paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((session.scroll, 0))
-            .block(Block::default().borders(Borders::ALL).title("Chat (PgUp/PgDn/Up/Down to scroll)"));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Chat (PgUp/PgDn/Up/Down to scroll)"),
+            );
         f.render_widget(paragraph, chat_area);
 
-        let input = Paragraph::new(session.input.clone()).block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Tab switch, F2 new, Esc quit)"));
+        let input = Paragraph::new(session.input.clone()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Input (Enter to send, Tab switch, F2 new, Esc quit)"),
+        );
         f.render_widget(input, chunks[2]);
     }
 }
@@ -576,7 +688,11 @@ fn spawn_sse_task(
         let client = Client::new();
         let url = format!("{}/stream/{}", base, conversation_id);
         let mut req = client.get(&url);
-        if let Some(id) = resume_id { if !id.is_empty() { req = req.header("Last-Event-ID", id); } }
+        if let Some(id) = resume_id {
+            if !id.is_empty() {
+                req = req.header("Last-Event-ID", id);
+            }
+        }
         if let Ok(resp) = req.send().await {
             if resp.status().is_success() {
                 let mut bytes_stream = resp.bytes_stream();
@@ -596,7 +712,9 @@ fn spawn_sse_task(
                                         }
                                     }
                                     buf.clear();
-                                } else { buf.push(b); }
+                                } else {
+                                    buf.push(b);
+                                }
                             }
                         }
                         Err(_) => break,
@@ -623,13 +741,21 @@ fn enable_terminal_features() -> io::Result<()> {
     let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
         | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
         | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
-    execute!(io::stdout(), EnableBracketedPaste, PushKeyboardEnhancementFlags(flags))?;
+    execute!(
+        io::stdout(),
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(flags)
+    )?;
     Ok(())
 }
 
 fn disable_terminal_features() -> io::Result<()> {
     // Pop enhancement flags and disable bracketed paste; ignore errors
-    let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags, DisableBracketedPaste);
+    let _ = execute!(
+        io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste
+    );
     Ok(())
 }
 
@@ -675,28 +801,47 @@ fn handle_sse_line(line: &str, idx: usize, gen: u64, tx: &UnboundedSender<UiEven
             match ev {
                 "token" => {
                     if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::ModelToken { idx, gen, text: text.to_string() });
+                        let _ = tx.send(UiEvent::ModelToken {
+                            idx,
+                            gen,
+                            text: text.to_string(),
+                        });
                     }
                 }
                 "output" => {
                     if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::ModelOutput { idx, gen, text: text.to_string() });
+                        let _ = tx.send(UiEvent::ModelOutput {
+                            idx,
+                            gen,
+                            text: text.to_string(),
+                        });
                     }
                 }
                 "tool_step" => {
                     let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
                     let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
-                    let summary = v.get("result_summary").and_then(|x| x.as_str()).unwrap_or("");
+                    let summary = v
+                        .get("result_summary")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("");
                     let line = if summary.is_empty() {
                         format!("[tool:{}] {}", status, name)
                     } else {
                         format!("[tool:{}] {}: {}", status, name, summary)
                     };
-                    let _ = tx.send(UiEvent::Tool { idx, gen, text: line });
+                    let _ = tx.send(UiEvent::Tool {
+                        idx,
+                        gen,
+                        text: line,
+                    });
                 }
                 "user_message" => {
                     if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::User { idx, gen, text: text.to_string() });
+                        let _ = tx.send(UiEvent::User {
+                            idx,
+                            gen,
+                            text: text.to_string(),
+                        });
                     }
                 }
                 _ => {}
