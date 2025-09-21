@@ -296,8 +296,37 @@ Environment variables:
 - `AGENT_MODEL` (Agents SDK model name, e.g., `gpt-4o-mini`; default `gpt-4o-mini`)
 - `AGENT_INSTRUCTIONS` (inline agent instructions; optional)
 - `AGENT_INSTRUCTIONS_FILE` (path to a file with agent instructions; overrides `AGENT_INSTRUCTIONS`)
-- `AGENT_TOOLS` (comma-separated tool names; currently unused/no-op, reserved for follow-ups)
+- `AGENT_TOOLS` (comma-separated tool names for allowlist; when set, only specified tools are available to the agent)
+- `AGENT_REQUIRE_EXPLICIT_TOOLS` (set to `1` for production hardening; when true, agents have no tools unless explicitly allowlisted via `AGENT_TOOLS`)
 - `OPENAI_API_KEY` (if set, the Worker uses the OpenAI Agents SDK runner; if unset, it falls back to EchoRunner for local/dev)
+
+### Tool Configuration Examples
+
+Configure agent tools via environment variables:
+
+```bash
+# Development: Allow specific tools only
+AGENT_TOOLS="terminal,todo" uv run python -m magent2.worker
+
+# Production hardening: Require explicit tool allowlist
+AGENT_REQUIRE_EXPLICIT_TOOLS=1 AGENT_TOOLS="terminal,todo" uv run python -m magent2.worker
+
+# Allow all available tools (default development behavior)
+# No AGENT_TOOLS needed - agent gets all detected tools
+uv run python -m magent2.worker
+```
+
+**Tool Discovery Behavior:**
+
+- **With `AGENT_TOOLS`**: Only specified tools are available; unknown tools are logged and skipped
+- **With `AGENT_REQUIRE_EXPLICIT_TOOLS=1`**: No tools available unless explicitly allowlisted
+- **Default**: All detected tools are available (development convenience)
+
+**Implementation References:**
+
+- Tool configuration parsing: `magent2/runner/config.py` (`_read_tools()`)
+- Tool discovery and resolution: `magent2/tools/registry.py` (`discover_tools()`)
+- Environment variable handling: `magent2/tools/registry.py` (`_env_true()`)
 
 Sessions:
 
