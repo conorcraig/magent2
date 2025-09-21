@@ -238,6 +238,48 @@ Environment:
 - Gateway ASGI app: `magent2.gateway.asgi:app`
 - Worker module: `python -m magent2.worker`
 
+### Top-level CLI
+
+After syncing deps, the CLI provides simple workflows:
+
+```bash
+# Ensure Docker stack (redis, gateway, worker)
+magent2 ensure
+
+# Launch UI. If `chat_tui/` exists, runs `cargo run` there; otherwise launches Python client.
+magent2 run
+
+# Launch Python client directly (no Docker ensure)
+magent2 client --base-url auto --agent DevAgent
+```
+
+Environment variables:
+
+- `MAGENT2_BASE_URL` (default `http://localhost:8000`) used by Python client and Rust TUI
+- `MAGENT2_AGENT_NAME` (default `DevAgent`) used by Rust TUI
+
+### Rust TUI (experimental)
+
+A minimal Ratatui-based terminal UI lives in `chat_tui/`.
+
+```bash
+# Build/run the TUI (requires Rust toolchain)
+cd chat_tui
+cargo run
+```
+
+Features:
+
+- Multi-session tabs (`Tab` to switch, `F2` new session)
+- Paste support and enhanced key handling
+- Streams from `/stream/{conversation_id}` and posts via `/send`
+- Toggle a tools pane (`F3`) that renders `tool_step` events
+
+Notes:
+
+- The top-level `magent2 run` will auto-launch the Rust TUI when `chat_tui/` is present.
+- When the TUI is unavailable, the Python client is used as a fallback.
+
 ## Configuration
 
 Environment variables:

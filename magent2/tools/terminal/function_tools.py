@@ -37,6 +37,89 @@ def _success_metadata(
     }
 
 
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
+def _log_tool_call(logger: Any, cwd: str | None, command: str | None, cmd_for_log: str) -> None:
+    logger.info(
+        "tool call",
+        extra={
+            "event": "tool_call",
+            "tool": "terminal.run",
+            "attributes": {
+                "cwd": cwd or "",
+                "command": (command.split(" ")[0] if command else ""),
+                "cmd": cmd_for_log,
+                "args_len": len(command.split(" ")[1:]) if command else 0,
+            },
+        },
+    )
+
+
+def _metrics_increment(metrics: Any, name: str, ctx: dict[str, Any]) -> None:
+    metrics.increment(
+        name,
+        {
+            "tool": "terminal",
+            "conversation_id": str(ctx.get("conversation_id", "")),
+            "run_id": str(ctx.get("run_id", "")),
+        },
+    )
+
+
+def _resolve_cwd_effective(tool: TerminalTool, cwd: str | None) -> str | None:
+    try:
+        return tool._resolve_working_dir(cwd)
+    except Exception:
+        return None
+
+
+def _extract_cmd_parts(command: str | None) -> tuple[str, str]:
+    try:
+        tokens = shlex.split(command or "")
+        raw = tokens[0] if tokens else ""
+        cmd = os.path.basename(raw) if raw else ""
+        return raw, cmd
+    except Exception:
+        return "", ""
+
+
+def _find_deny_prefix(tool: TerminalTool, raw: str, cmd: str) -> str | None:
+    try:
+        for prefix in tool.deny_command_prefixes or []:
+            if cmd.startswith(prefix) or raw.startswith(prefix):
+                return prefix
+        return None
+    except Exception:
+        return None
+
+
+def _classify_policy_reason(deny_prefix: str | None, exc: Exception) -> str | None:
+    if not isinstance(exc, PermissionError):
+        return None
+    try:
+        text = str(exc).lower()
+    except Exception:
+        text = ""
+    if deny_prefix is not None or "denied by policy" in text:
+        return "denylist"
+    if "not allowed" in text:
+        return "allowlist"
+    return None
+
+
+def _detect_policy_context(
+    tool: TerminalTool, command: str | None, exc: Exception
+) -> tuple[str | None, str | None]:
+    raw, cmd = _extract_cmd_parts(command)
+    deny_prefix = _find_deny_prefix(tool, raw, cmd)
+    reason = _classify_policy_reason(deny_prefix, exc)
+    return reason, deny_prefix
+
+
 def _build_error_metadata(
     tool: TerminalTool,
     policy: TerminalPolicy,
@@ -46,39 +129,8 @@ def _build_error_metadata(
 ) -> dict[str, Any]:
     allowed_count = len(policy.allowed_commands)
     allowed_sample = policy.allowed_commands[:5]
-
-    def _resolve_cwd_effective() -> str | None:
-        try:
-            return tool._resolve_working_dir(cwd)
-        except Exception:
-            return None
-
-    def _analyze_policy_denial() -> tuple[str | None, str | None]:
-        try:
-            tokens = shlex.split(command or "")
-            raw = tokens[0] if tokens else ""
-            cmd = os.path.basename(raw) if raw else ""
-            dp = next(
-                (
-                    p
-                    for p in (tool.deny_command_prefixes or [])
-                    if (cmd.startswith(p) or raw.startswith(p))
-                ),
-                None,
-            )
-            if isinstance(exc, PermissionError):
-                text = str(exc).lower()
-                if dp is not None or "denied by policy" in text:
-                    return "denylist", dp
-                if "not allowed" in text:
-                    return "allowlist", dp
-            return None, dp
-        except Exception:
-            return None, None
-
-    policy_reason, deny_prefix = _analyze_policy_denial()
-    cwd_effective = _resolve_cwd_effective()
-
+    policy_reason, deny_prefix = _detect_policy_context(tool, command, exc)
+    cwd_effective = _resolve_cwd_effective(tool, cwd)
     return {
         "policy_reason": policy_reason,
         "allowed_count": allowed_count,
@@ -300,64 +352,51 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
 
     try:
         start_ns = time.perf_counter_ns()
-        logger.info(
-            "tool call",
-            extra={
-                "event": "tool_call",
-                "tool": "terminal.run",
-                "attributes": {
-                    "cwd": cwd or "",
-                    "command": (command.split(" ")[0] if command else ""),
-                    "args_len": len(command.split(" ")[1:]) if command else 0,
-                },
-            },
+        redacted_cmd_full = _redact_text(
+            command or "", policy.redact_substrings, policy.redact_patterns
         )
-        metrics.increment(
-            "tool_calls",
-            {
-                "tool": "terminal",
-                "conversation_id": str(ctx.get("conversation_id", "")),
-                "run_id": str(ctx.get("run_id", "")),
-            },
-        )
+        cmd_for_log = _truncate(redacted_cmd_full, 160)
+        _log_tool_call(logger, cwd, command, cmd_for_log)
+        _metrics_increment(metrics, "tool_calls", ctx)
+
         result: dict[str, Any] = tool.run(command, cwd=cwd)
 
-        combined = result.get("stdout", "")
-        combined = _redact_text(combined, policy.redact_substrings, policy.redact_patterns)
+        combined = _redact_text(
+            result.get("stdout", ""), policy.redact_substrings, policy.redact_patterns
+        )
         concise = combined[: policy.function_output_max_chars]
 
         status = _format_status(result)
-        # Success log for observability
-        logger.info(
-            "tool success",
-            extra={
-                "event": "tool_success",
-                "tool": "terminal.run",
-                "attributes": _success_metadata(cwd, command, result),
-            },
-        )
         duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        success_attrs = {
+            **_success_metadata(cwd, command, result),
+            "duration_ms": duration_ms,
+            "output_len": len(concise),
+            "cmd": cmd_for_log,
+            "cwd": cwd or "",
+        }
         logger.info(
             "tool success",
             extra={
                 "event": "tool_success",
                 "tool": "terminal.run",
-                "attributes": {
-                    "exit": result.get("exit_code"),
-                    "timeout": bool(result.get("timeout")),
-                    "truncated": bool(result.get("truncated")),
-                    "duration_ms": duration_ms,
-                    "output_len": len(concise),
-                },
+                "attributes": success_attrs,
             },
         )
-        # Note: success is logged once with duration/output_len; avoid duplicate entries
         return f"{status}\noutput:\n{concise}"
     except Exception as exc:  # noqa: BLE001
         # Convert exceptions into a concise, redacted failure string
         msg = _redact_text(str(exc), policy.redact_substrings, policy.redact_patterns)
         concise_err = msg[: policy.function_output_max_chars]
         meta = _build_error_metadata(tool, policy, command, cwd, exc)
+        meta.update(
+            {
+                "cmd": _redact_text(
+                    command or "", policy.redact_substrings, policy.redact_patterns
+                )[:160],
+                "cwd": cwd or "",
+            }
+        )
         logger.error(
             "tool error",
             extra={
@@ -366,14 +405,7 @@ def terminal_run(command: str, cwd: str | None = None) -> str:
                 "metadata": {"error": concise_err[:200], **meta},
             },
         )
-        metrics.increment(
-            "tool_errors",
-            {
-                "tool": "terminal",
-                "conversation_id": str(ctx.get("conversation_id", "")),
-                "run_id": str(ctx.get("run_id", "")),
-            },
-        )
+        _metrics_increment(metrics, "tool_errors", ctx)
         return "ok=false exit=None timeout=false truncated=false\nerror:\n" + concise_err
 
 

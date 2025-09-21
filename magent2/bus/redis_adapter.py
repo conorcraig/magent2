@@ -63,8 +63,38 @@ class RedisBus(Bus):
             "payload": json.dumps(message.payload, separators=(",", ":")),
         }
         # We ignore the returned entry id here and keep the canonical uuid as the Bus id
-        self._redis.xadd(topic, fields)
+        maxlen_value = self._parse_maxlen_env()
+        self._xadd_with_optional_maxlen(topic, fields, maxlen_value)
         return message.id
+
+    # ----------------------------
+    # Small helpers to keep publish complexity low
+    # ----------------------------
+    @staticmethod
+    def _parse_maxlen_env() -> int | None:
+        raw = (os.getenv("BUS_STREAM_MAXLEN") or "").strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+            return value if value > 0 else None
+        except Exception:
+            return None
+
+    def _xadd_with_optional_maxlen(
+        self, topic: str, fields: dict[str, str], maxlen: int | None
+    ) -> None:
+        if maxlen is None:
+            self._redis.xadd(topic, fields)
+            return
+        try:
+            # approximate=True uses Redis' '~' trimming for performance
+            self._redis.xadd(topic, fields, maxlen=maxlen, approximate=True)
+        except TypeError:
+            # Fallback for older redis-py without keyword args support
+            self._redis.xadd(topic, fields)
+        except Exception:
+            self._redis.xadd(topic, fields)
 
     def read(
         self,

@@ -48,7 +48,7 @@ def load_config(env: dict[str, str] | None = None) -> RunnerConfig:
     return RunnerConfig(
         api_key=e.get("OPENAI_API_KEY"),
         agent_name=e.get("AGENT_NAME", "DevAgent"),
-        model=e.get("AGENT_MODEL", "gpt-4o-mini"),
+        model=e.get("AGENT_MODEL", "gpt-5"),
         instructions=_read_instructions(),
         tools=_read_tools(),
         max_turns=max_turns,

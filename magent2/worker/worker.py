@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from magent2.bus.interface import Bus, BusMessage
 from magent2.models.envelope import BaseStreamEvent, MessageEnvelope
 from magent2.observability import get_json_logger, get_metrics, use_run_context
+from magent2.observability.index import ObserverIndex
 
 
 class Runner(Protocol):
@@ -41,6 +42,7 @@ class Worker:
         # In-memory fallbacks for idempotency and single-flight when Redis is not available
         self._processed_by_conversation: dict[str, set[str]] = {}
         self._locks_in_memory: set[str] = set()
+        self._obs_index = ObserverIndex.from_bus(bus)
 
     @property
     def agent_name(self) -> str:
@@ -100,6 +102,11 @@ class Worker:
 
         with use_run_context(run_id, envelope.conversation_id, self._agent_name):
             start_ns = time.perf_counter_ns()
+            # Best-effort: record run start
+            try:
+                self._obs_index.record_run_started(self._agent_name, envelope.conversation_id, None)
+            except Exception:
+                pass
             self._log_run_started(logger, run_id, envelope)
             metrics.increment(
                 "runs_started",
@@ -150,6 +157,13 @@ class Worker:
                             "conversation_id": envelope.conversation_id,
                         },
                     )
+                    # Best-effort: record run completed
+                    try:
+                        self._obs_index.record_run_completed(
+                            self._agent_name, envelope.conversation_id, None, errored=False
+                        )
+                    except Exception:
+                        pass
 
     def _stream_events(
         self, envelope: MessageEnvelope, stream_topic: str
@@ -337,6 +351,12 @@ class Worker:
                     "runs_hard_failed",
                     {"agent": self._agent_name, "category": category, "phase": "immediate"},
                 )
+                try:
+                    self._obs_index.record_run_completed(
+                        self._agent_name, envelope.conversation_id, None, errored=True
+                    )
+                except Exception:
+                    pass
                 raise
 
         # Should not reach here

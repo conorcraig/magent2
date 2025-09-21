@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from scripts.client import ClientConfig, StreamPrinter, one_shot
+from magent2.client.cli import ClientConfig, StreamPrinter, one_shot
 
 
 class DummyIterLines:

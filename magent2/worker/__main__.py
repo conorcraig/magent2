@@ -12,7 +12,6 @@ from magent2.models.envelope import BaseStreamEvent, MessageEnvelope, OutputEven
 from magent2.observability import get_json_logger
 from magent2.runner.config import load_config
 from magent2.runner.openai_agents_runner import OpenAIAgentsRunner
-from magent2.runner.openai_responses_runner import OpenAIResponsesRunner
 from magent2.tools.registry import discover_tools
 from magent2.worker.worker import Runner, Worker
 
@@ -46,19 +45,6 @@ def build_runner_from_env() -> Runner:
             },
         )
         return OpenAIAgentsRunner(agent)
-    # Fallback when API key present but Agents path not selected
-    if os.getenv("OPENAI_API_KEY"):
-        model = os.getenv("AGENT_MODEL", "gpt-4o-mini")
-        get_json_logger("magent2").info(
-            "runner selected",
-            extra={
-                "event": "runner_selected",
-                "runner": "OpenAIResponses",
-                "agent": cfg.agent_name,
-                "model": model,
-            },
-        )
-        return OpenAIResponsesRunner(model)
     get_json_logger("magent2").info(
         "runner selected",
         extra={

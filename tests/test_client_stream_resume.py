@@ -30,8 +30,8 @@ def _sse_line(payload: dict[str, Any]) -> str:
 def test_client_dedupes_replayed_tokens_across_reconnects(
     monkeypatch: pytest.MonkeyPatch, capsys: Any, mode: str
 ) -> None:  # noqa: ANN401
-    import scripts.client as client_mod
-    from scripts.client import ClientConfig, one_shot
+    import magent2.client.cli as client_mod
+    from magent2.client.cli import ClientConfig, one_shot
 
     calls: list[dict[str, Any]] = []
 

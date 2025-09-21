@@ -568,13 +568,44 @@ class OpenAIAgentsRunner:
         name_val = d.get("name") if isinstance(d.get("name"), str) else None
         args_val = d.get("arguments")
 
-        if isinstance(args_val, str):
-            # SDK sometimes provides JSON-string arguments; do not parse here, keep preview minimal
-            args_preview = {"len": len(args_val)}
-        elif isinstance(args_val, dict):
-            args_preview = args_val
-        else:
-            args_preview = {}
+        # Build a minimal, safe args preview. For known terminal tools, extract command/cwd.
+        def _minimal_args_preview(tool_name: str | None, arguments: Any) -> dict[str, Any]:
+            try:
+                is_terminal = isinstance(tool_name, str) and tool_name in (
+                    "terminal_run_tool",
+                    "terminal_run",
+                    "terminal.run",
+                    "terminal.run_tool",
+                )
+                parsed: dict[str, Any] | None = None
+                if isinstance(arguments, str):
+                    if is_terminal:
+                        parsed = json.loads(arguments)
+                elif isinstance(arguments, dict):
+                    parsed = arguments
+                if isinstance(parsed, dict):
+                    cmd = parsed.get("command")
+                    cwd = parsed.get("cwd")
+                    out: dict[str, Any] = {}
+                    if isinstance(cmd, str) and cmd:
+                        out["command"] = cmd if len(cmd) <= 160 else (cmd[:157] + "...")
+                    if isinstance(cwd, str) and cwd:
+                        out["cwd"] = cwd
+                    if out:
+                        return out
+                # Fallback for non-terminal or unparsed args
+                if isinstance(arguments, str):
+                    return {"len": len(arguments)}
+                if isinstance(arguments, dict):
+                    try:
+                        return {"keys": list(arguments.keys())[:5]}
+                    except Exception:
+                        return {}
+            except Exception:
+                pass
+            return {}
+
+        args_preview = _minimal_args_preview(name_val, args_val)
 
         return ResponseEventData(call_id, name_val, args_preview, d)
 
@@ -601,7 +632,7 @@ class OpenAIAgentsRunner:
         return ToolStepEvent(
             conversation_id=conversation_id,
             name=event_data.name_val,
-            args={},
+            args=event_data.args_preview or {},
             result_summary=self._summarize(result_val) if result_val is not None else None,
             status="success",
             duration_ms=dur_ms,
@@ -617,7 +648,7 @@ class OpenAIAgentsRunner:
         return ToolStepEvent(
             conversation_id=conversation_id,
             name=event_data.name_val,
-            args={},
+            args=event_data.args_preview or {},
             status="error",
             error=self._summarize(err_text, limit=160),
             tool_call_id=call_id,

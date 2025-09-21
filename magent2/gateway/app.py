@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from magent2.bus.interface import Bus, BusMessage
 from magent2.bus.utils import compute_publish_topics
 from magent2.observability import configure_uvicorn_logging, get_json_logger, get_metrics
+from magent2.observability.index import ObserverIndex
 
 
 # ----------------------------
@@ -122,6 +123,21 @@ def create_app(bus: Bus) -> FastAPI:
     configure_uvicorn_logging()
     logger = get_json_logger("magent2.gateway")
     metrics = get_metrics()
+    # Shutdown signal used to encourage prompt exit of long‑lived generators
+    shutdown_flag: asyncio.Event = asyncio.Event()
+
+    @app.on_event("shutdown")
+    async def _on_shutdown() -> None:
+        try:
+            shutdown_flag.set()
+        except Exception:
+            pass
+        logger.info(
+            "gateway shutdown",
+            extra={"event": "gateway_shutdown", "service": "gateway"},
+        )
+
+    obs_index = ObserverIndex.from_bus(bus)
 
     @app.get("/health")
     async def health() -> dict[str, str]:  # lightweight healthcheck endpoint
@@ -208,6 +224,13 @@ def create_app(bus: Bus) -> FastAPI:
             },
         )
         metrics.increment("gateway_sends", {"conversation_id": message.conversation_id})
+        # Best-effort: write to observer index (no-op if disabled/unavailable)
+        try:
+            obs_index.record_user_message(
+                message.conversation_id, message.sender, message.recipient, message.content, None
+            )
+        except Exception:
+            pass
         return {"status": "ok", "topic": conv_topic}
 
     @app.get("/stream/{conversation_id}")
@@ -246,31 +269,46 @@ def create_app(bus: Bus) -> FastAPI:
             import time as _time
 
             last_hb = _time.monotonic()
-            while True:
-                items = await asyncio.to_thread(
-                    lambda: list(bus.read(topic, last_id=cursor, limit=100))
-                )
-                if items:
-                    for m in items:
-                        payload = m.payload
-                        safe_payload = _truncate_payload_for_sse(payload, cap)
-                        data = json.dumps(safe_payload, separators=(",", ":"))
-                        # Emit SSE id for resume support
-                        yield f"id: {m.id}\n"
-                        yield f"data: {data}\n\n"
-                        cursor = m.id
-                        sent += 1
-                        if max_events is not None and sent >= max_events:
+            try:
+                while True:
+                    # Exit promptly if the app is shutting down
+                    if shutdown_flag.is_set():
+                        return
+                    # Exit promptly if client disconnects (including server shutdown)
+                    try:
+                        if await request.is_disconnected():
                             return
-                else:
-                    # avoid tight loop when no new items are available
-                    if not blocking_supported:
-                        await asyncio.sleep(0.02)
-                # Heartbeat every 15s to keep connections alive through proxies
-                now = _time.monotonic()
-                if now - last_hb >= 15.0:
-                    last_hb = now
-                    yield ":\n\n"
+                    except Exception:
+                        # Best-effort; continue if disconnect check fails
+                        pass
+
+                    items = await asyncio.to_thread(
+                        lambda: list(bus.read(topic, last_id=cursor, limit=100))
+                    )
+                    if items:
+                        for m in items:
+                            payload = m.payload
+                            safe_payload = _truncate_payload_for_sse(payload, cap)
+                            data = json.dumps(safe_payload, separators=(",", ":"))
+                            # Emit SSE id for resume support
+                            yield f"id: {m.id}\n"
+                            yield f"data: {data}\n\n"
+                            cursor = m.id
+                            sent += 1
+                            if max_events is not None and sent >= max_events:
+                                return
+                    else:
+                        # avoid tight loop when no new items are available
+                        if not blocking_supported:
+                            await asyncio.sleep(0.02)
+                    # Heartbeat every 15s to keep connections alive through proxies
+                    now = _time.monotonic()
+                    if now - last_hb >= 15.0:
+                        last_hb = now
+                        yield ":\n\n"
+            except asyncio.CancelledError:
+                # Gracefully exit on task cancellation during server shutdown
+                return
 
         logger.info(
             "gateway stream start",
@@ -303,5 +341,44 @@ def create_app(bus: Bus) -> FastAPI:
             )
             metrics.increment("gateway_ready_errors", {})
             raise HTTPException(status_code=503, detail="bus not ready") from exc
+
+    # ----------------------------
+    # Observer endpoints (read-only)
+    # ----------------------------
+
+    @app.get("/conversations")
+    async def conversations(limit: int = 50, since_ms: int | None = None) -> dict[str, Any]:
+        try:
+            n = max(1, min(200, int(limit)))
+        except Exception:
+            n = 50
+        try:
+            items = obs_index.list_conversations(limit=n, since_ms=since_ms)
+        except Exception:
+            items = []
+        return {"conversations": items}
+
+    @app.get("/agents")
+    async def agents() -> dict[str, Any]:
+        try:
+            items = obs_index.list_agents()
+        except Exception:
+            items = []
+        return {"agents": items}
+
+    @app.get("/graph/{conversation_id}")
+    async def graph(conversation_id: str) -> dict[str, Any]:
+        # If index is disabled or unavailable, return empty graph gracefully
+        try:
+            if not obs_index.is_active():
+                return {"nodes": [], "edges": []}
+            if not obs_index.conversation_exists(conversation_id):
+                raise HTTPException(status_code=404, detail="unknown conversation_id")
+            g = obs_index.get_graph(conversation_id) or {"nodes": [], "edges": []}
+            return g
+        except HTTPException:
+            raise
+        except Exception:
+            return {"nodes": [], "edges": []}
 
     return app

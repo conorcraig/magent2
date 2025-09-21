@@ -60,8 +60,6 @@ class StreamPrinter:
         self._last_token_index: int | None = None
         # Resume support: remember last SSE id we saw (server sends id: ...)
         self._last_event_id: str | None = None
-        # Cache tool args by tool_call_id so we can show context on success/error
-        self._tool_args_by_id: dict[str, Any] = {}
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -350,37 +348,24 @@ class StreamPrinter:
         status = str(data.get("status", "")).lower() if data.get("status") is not None else ""
         error_msg = data.get("error")
         duration_ms = data.get("duration_ms")
-        tool_call_id = str(data.get("tool_call_id") or "")
 
         # Default: hide start lines to reduce duplication
         if status == "start":
-            # Remember args for this tool_call so we can display context later
-            if tool_call_id and args is not None:
-                self._tool_args_by_id[tool_call_id] = args
             return
 
         self._println("")
-        self._handle_tool_step_by_status(
-            name, summary, args, status, error_msg, duration_ms, tool_call_id
-        )
+        self._handle_tool_step_by_status(name, summary, args, status, error_msg, duration_ms)
 
     def _handle_tool_step_by_status(
-        self,
-        name: str,
-        summary: Any,
-        args: Any,
-        status: str,
-        error_msg: Any,
-        duration_ms: Any,
-        tool_call_id: str,
+        self, name: str, summary: Any, args: Any, status: str, error_msg: Any, duration_ms: Any
     ) -> None:
         """Handle tool step based on status type."""
         if self._is_tool_call_status(status, summary):
             self._handle_tool_call(name, args)
         elif status == "error":
-            self._handle_tool_error(name, error_msg, summary, tool_call_id, args)
+            self._handle_tool_error(name, error_msg, summary)
         else:
-            self._handle_tool_success(name, summary, duration_ms, tool_call_id, args)
+            self._handle_tool_success(name, summary, duration_ms)
 
     def _is_tool_call_status(self, status: str, summary: Any) -> bool:
         """Check if this is a tool call status."""
@@ -391,57 +376,20 @@ class StreamPrinter:
         rendered = self._render_tool_args(args)
         self._println(f"[tool] call -> {name} {rendered}")
 
-    def _handle_tool_error(
-        self, name: str, error_msg: Any, summary: Any, tool_call_id: str, args: Any
-    ) -> None:
+    def _handle_tool_error(self, name: str, error_msg: Any, summary: Any) -> None:
         """Handle tool error display."""
         short_err = str(error_msg if error_msg is not None else summary or "error")
-        ctx = self._render_tool_context(tool_call_id, args)
-        if ctx:
-            self._println(f"[tool][ERROR] {name}{ctx}: {short_err}")
-        else:
-            self._println(f"[tool][ERROR] {name}: {short_err}")
+        self._println(f"[tool][ERROR] {name}: {short_err}")
 
-    def _handle_tool_success(
-        self, name: str, summary: Any, duration_ms: Any, tool_call_id: str, args: Any
-    ) -> None:
+    def _handle_tool_success(self, name: str, summary: Any, duration_ms: Any) -> None:
         """Handle tool success display."""
         short = self._render_summary(summary)
         pretty = self._prettify_json_if_needed(short)
 
-        ctx = self._render_tool_context(tool_call_id, args)
         if isinstance(duration_ms, int):
-            if ctx:
-                self._println(f"[tool] {name}{ctx}: {pretty} ({duration_ms}ms)")
-            else:
-                self._println(f"[tool] {name}: {pretty} ({duration_ms}ms)")
+            self._println(f"[tool] {name}: {pretty} ({duration_ms}ms)")
         else:
-            if ctx:
-                self._println(f"[tool] {name}{ctx}: {pretty}")
-            else:
-                self._println(f"[tool] {name}: {pretty}")
-
-    def _render_tool_context(self, tool_call_id: str, live_args: Any) -> str:
-        """Return a concise context string like ' cmd=... cwd=...'."""
-        # Prefer live args from the event; fall back to cached start-args
-        args = live_args
-        if (not args) and tool_call_id:
-            args = self._tool_args_by_id.get(tool_call_id)
-        if not isinstance(args, dict):
-            return ""
-        parts: list[str] = []
-        cmd = args.get("command") if isinstance(args.get("command"), str) else None
-        cwd = args.get("cwd") if isinstance(args.get("cwd"), str) else None
-        if cmd:
-            # Trim very long commands in UI
-            trimmed = cmd if len(cmd) <= 160 else (cmd[:157] + "...")
-            parts.append(f'cmd="{trimmed}"')
-        if cwd:
-            parts.append(f'cwd="{cwd}"')
-        if parts:
-            return " " + " ".join(parts)
-        # If no known fields, avoid dumping the whole args; keep minimal
-        return ""
+            self._println(f"[tool] {name}: {pretty}")
 
     def _prettify_json_if_needed(self, text: str) -> str:
         """Pretty-print text if it looks like JSON."""

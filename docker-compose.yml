@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379"
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -22,12 +22,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # Optionally override module levels, e.g., "magent2.tools=warning"
       - LOG_MODULE_LEVELS=${LOG_MODULE_LEVELS:-}
-    command: ["uvicorn", "magent2.gateway.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--no-access-log", "--lifespan", "off"]
+    command: ["uvicorn", "magent2.gateway.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--no-access-log", "--timeout-graceful-shutdown", "3"]
     depends_on:
       redis:
         condition: service_healthy
     ports:
-      - "8000"
+      - "${GATEWAY_PORT:-8000}:8000"
     logging:
       driver: json-file
       options:

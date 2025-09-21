@@ -194,3 +194,75 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int)
             "-",
             "Results: reports/pytest-report.json (JSON). See this file for full details.",
         )
+
+
+def _compact_failure_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
+    outcome = entry.get("outcome") or ""
+    if not (isinstance(outcome, str) and outcome in {"failed", "error"}):
+        return None
+    compact: dict[str, Any] = {"outcome": outcome}
+    nodeid = entry.get("nodeid")
+    lineno = entry.get("lineno")
+    if isinstance(nodeid, str) and nodeid:
+        compact["nodeid"] = nodeid
+    if isinstance(lineno, int):
+        compact["lineno"] = lineno
+    call = entry.get("call") if isinstance(entry.get("call"), dict) else None
+    if isinstance(call, dict):
+        crash = call.get("crash") if isinstance(call.get("crash"), dict) else None
+        if isinstance(crash, dict):
+            crash_out: dict[str, Any] = {}
+            cpath = crash.get("path")
+            clineno = crash.get("lineno")
+            cmsg = crash.get("message")
+            if isinstance(cpath, str) and cpath:
+                crash_out["path"] = cpath
+            if isinstance(clineno, int):
+                crash_out["lineno"] = clineno
+            if isinstance(cmsg, str) and cmsg:
+                crash_out["message"] = cmsg
+            if crash_out:
+                compact["crash"] = crash_out
+        lrepr = call.get("longrepr")
+        if isinstance(lrepr, str) and lrepr:
+            compact["longrepr"] = lrepr
+    return compact
+
+
+def _filter_failures(tests: list[Any]) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for entry in tests:
+        if not isinstance(entry, dict):
+            continue
+        compact = _compact_failure_entry(entry)
+        if compact is not None:
+            filtered.append(compact)
+    return filtered
+
+
+def _drop_collectors(json_report: Any) -> None:
+    if isinstance(json_report, dict) and "collectors" in json_report:
+        try:
+            del json_report["collectors"]
+        except Exception:
+            pass
+
+
+def _mark_only_failures(json_report: Any) -> None:
+    existing_meta = json_report.get("meta") if isinstance(json_report.get("meta"), dict) else None
+    meta: dict[str, Any] = existing_meta if isinstance(existing_meta, dict) else {}
+    meta["only_failures"] = True
+    json_report["meta"] = meta
+
+
+def pytest_json_modifyreport(json_report: Any) -> None:  # noqa: D401
+    """Minimize JSON report size for agents by keeping only failures/errors."""
+    try:
+        tests = json_report.get("tests")
+        if isinstance(tests, list):
+            json_report["tests"] = _filter_failures(tests)
+        _drop_collectors(json_report)
+        _mark_only_failures(json_report)
+    except Exception:
+        # Never fail the test run due to reporting tweaks
+        pass

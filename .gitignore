@@ -39,3 +39,7 @@ pr_diffs/
 
 # local cache for temporary downloads
 .cache/
+
+# Rust build artifacts
+chat_tui/target/
+chat_tui/Cargo.lock

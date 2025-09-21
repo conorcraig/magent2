@@ -28,8 +28,8 @@ def _sse_line(payload: dict[str, Any]) -> str:
 
 def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     # Import locally to access the same module objects for monkeypatching
-    import scripts.client as client_mod
-    from scripts.client import ClientConfig, one_shot
+    import magent2.client.cli as client_mod
+    from magent2.client.cli import ClientConfig, one_shot
 
     created_late = "9999-01-01T00:00:00+00:00"
 
@@ -87,8 +87,8 @@ def test_one_shot_success(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
 
 
 def test_one_shot_timeout(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
-    import scripts.client as client_mod
-    from scripts.client import ClientConfig, one_shot
+    import magent2.client.cli as client_mod
+    from magent2.client.cli import ClientConfig, one_shot
 
     created_late = "9999-01-01T00:00:00+00:00"
 
