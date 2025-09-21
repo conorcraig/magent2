@@ -268,6 +268,9 @@ cd chat_tui
 cargo run
 ```
 
+See `docs/FRONTEND_TUI.md` for a complete tour, keybindings, and observer API
+details.
+
 Features:
 
 - Multi-session tabs (`Tab` to switch, `F2` new session)
