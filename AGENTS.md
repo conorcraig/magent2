@@ -37,7 +37,8 @@
 - **Terminal hygiene**:
   - Use absolute paths in commands where possible.
   - Prefer simple, non-chained commands; avoid unnecessary `cd`.
-  - Use non-interactive flags (e.g., `--yes`) and pipe pagers to `cat`.
+  - Use non-interactive flags (e.g., `--yes`). Avoid piping through `| cat` unless a pager would otherwise capture output.
+  - Do not wrap commands in `bash -lc` unless strictly required by the tool; call binaries directly (e.g., `cargo`, `uv`, `gh`).
   - When waiting in terminal, use `sleep` rather than pausing work.
 - **File operations**: Use `git mv` for moves/renames; do not manipulate tracked files outside Git when changing their paths.
 - **External research**: For external tooling/library issues or unexpected third-party behavior, consult official docs and credible sources before changes.
@@ -98,6 +99,28 @@
 - **Search**: Prefer semantic search for understanding, exact search for symbols.
 - **Parallelism**: Where safe, batch independent read-only operations in parallel to improve speed.
 - **Commands**: Use non-interactive flags; avoid long-running foreground jobs. If needed, run jobs in the background and wait with `sleep`.
+
+### Rust (TUI) Standards
+
+- The repository includes a Rust TUI under `chat_tui/`.
+- When changing Rust code:
+  - Run `cargo fmt --all -- --check` and `cargo clippy -D warnings` locally.
+  - Ensure `just check` is green; it runs cargo fmt/clippy automatically when `cargo` is available.
+  - Prefer crate-supported solutions (e.g., pulldown-cmark for Markdown, ratatui widgets) over hand-rolled implementations. Research official docs/crates before implementing common UI patterns (auto-scroll, keybinding focus, markdown lists).
+
+### GitHub Organization (lightweight)
+
+- Prefer milestones and sub-issues over labels (keep labels minimal).
+- Epic tracking:
+  - TUI epic is issue `#122`. Link TUI-related work as sub-issues of `#122`.
+- Milestones in use:
+  - `M1: TUI MVP` — shipped backend observer, endpoints, worker instrumentation, and initial TUI.
+  - `M2: TUI polish` — TUI UX items (auto-scroll, keybindings, titles, history, spinner, markdown polish).
+  - `M3: Hardening` — security/terminal hardening and runtime safeguards.
+- Practice:
+  - Assign new issues to the appropriate milestone on creation.
+  - Add a short progress comment when work lands; reference commit hashes.
+  - Avoid adding labels unless explicitly requested.
 
 ## Exceptions
 
