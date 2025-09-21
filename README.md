@@ -244,7 +244,7 @@ After syncing deps, the CLI provides simple workflows:
 
 ```bash
 # Launch the Rust TUI (ensures stack if needed)
-just run_tui
+just tui
 
 # Launch Python client directly (headless streaming client)
 magent2 client --base-url auto --agent DevAgent
@@ -283,7 +283,7 @@ Features:
 
 Notes:
 
-- Use `just run_tui` to spin up the stack and launch the Rust TUI when `chat_tui/`
+- Use `just tui` to spin up the stack and launch the Rust TUI when `chat_tui/`
   is present.
 - The `magent2` CLI entry point is under redesign (see issue #159) and currently
   only exposes the streaming client directly.

@@ -45,5 +45,5 @@
 ## Status
 
 - ✅ Implemented via commit `c673c9b` (2025-09-21): agents pane, graph pane, throttled polling, layout split, and empty-state handling landed in `chat_tui/src/main.rs`.
-- Docs updated (`docs/FRONTEND_TUI.md`, `README.md`) and new `just run_tui` flow recorded.
+- Docs updated (`docs/FRONTEND_TUI.md`, `README.md`) and new `just tui` flow recorded.
 - Open question resolved: panes can render alongside conversations panel with vertical/horizontal splits as implemented.

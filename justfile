@@ -69,7 +69,7 @@ update:
 test:
 	uv run --isolated pytest -q
 
-run_tui:
+tui:
 	# Ensure Docker stack is running before launching the Rust TUI
 	@printf "\033[1;36m==> Ensuring gateway stack is up\033[0m\n"
 	@docker compose up -d redis gateway worker

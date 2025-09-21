@@ -129,6 +129,9 @@ struct ChatSession {
     gen: u64, // increments each time user sends; filters stale stream tasks
     last_sse_id: Option<String>,
     scroll: u16,
+    max_scroll: u16,
+    viewport_height: u16,
+    follow: bool,
     stream_task: Option<JoinHandle<()>>, // abort previous SSE task on new send
     conversation_id: Option<String>,     // None until first send, then set to new id
     busy: Option<BusyState>,
@@ -197,6 +200,9 @@ impl AppState {
                 gen: 0,
                 last_sse_id: None,
                 scroll: 0,
+                max_scroll: 0,
+                viewport_height: 0,
+                follow: true,
                 stream_task: None,
                 conversation_id: None,
                 busy: None,
@@ -432,7 +438,7 @@ async fn main() -> std::io::Result<()> {
                 }
             }
         }
-        terminal.draw(|f| render_ui(f, &app))?;
+        terminal.draw(|f| render_ui(f, &mut app))?;
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 CEvent::Key(key_event) => {
@@ -467,6 +473,8 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     if let Some(session) = app.sessions.get_mut(app.active) {
                         session.messages.clear();
                         session.scroll = 0;
+                        session.max_scroll = 0;
+                        session.follow = true;
                     }
                     return false;
                 }
@@ -777,6 +785,9 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 gen: 0,
                 last_sse_id: None,
                 scroll: 0,
+                max_scroll: 0,
+                viewport_height: 0,
+                follow: true,
                 stream_task: None,
                 conversation_id: None, // new session starts blank; id allocated on first send
                 busy: None,
@@ -792,6 +803,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 if session.scroll > 0 {
                     session.scroll -= 1;
                 }
+                session.follow = session.scroll == session.max_scroll;
             }
         }
         KeyCode::Down => {
@@ -801,8 +813,9 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     app.conversations_selected += 1;
                 }
             } else if let Some(session) = app.sessions.get_mut(app.active) {
-                // naive increment; rendering will clamp visually
-                session.scroll = session.scroll.saturating_add(1);
+                let new_scroll = session.scroll.saturating_add(1).min(session.max_scroll);
+                session.scroll = new_scroll;
+                session.follow = session.scroll == session.max_scroll;
             }
         }
         KeyCode::PageUp => {
@@ -811,6 +824,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 app.conversations_selected = dec;
             } else if let Some(session) = app.sessions.get_mut(app.active) {
                 session.scroll = session.scroll.saturating_sub(10);
+                session.follow = session.scroll == session.max_scroll;
             }
         }
         KeyCode::PageDown => {
@@ -818,7 +832,15 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                 let max = app.conversations.len().saturating_sub(1);
                 app.conversations_selected = (app.conversations_selected + 10).min(max);
             } else if let Some(session) = app.sessions.get_mut(app.active) {
-                session.scroll = session.scroll.saturating_add(10);
+                let new_scroll = session.scroll.saturating_add(10).min(session.max_scroll);
+                session.scroll = new_scroll;
+                session.follow = session.scroll == session.max_scroll;
+            }
+        }
+        KeyCode::End => {
+            if let Some(session) = app.sessions.get_mut(app.active) {
+                session.scroll = session.max_scroll;
+                session.follow = true;
             }
         }
         // Ctrl+L and Ctrl+U handled in the Char(c) branch above
@@ -978,7 +1000,25 @@ async fn fetch_graph(base_url: &str, conversation_id: &str) -> Result<GraphData,
     })
 }
 
-fn render_ui(f: &mut Frame, app: &AppState) {
+fn total_message_rows(lines: &[Line], max_width: usize) -> usize {
+    if lines.is_empty() {
+        return 0;
+    }
+    let effective_width = max_width.max(1);
+    lines
+        .iter()
+        .map(|line| {
+            let width = line.width();
+            if width == 0 {
+                1
+            } else {
+                (width + effective_width - 1) / effective_width
+            }
+        })
+        .sum()
+}
+
+fn render_ui(f: &mut Frame, app: &mut AppState) {
     let size = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1043,7 +1083,7 @@ fn render_ui(f: &mut Frame, app: &AppState) {
         side_area = Some(split[1]);
     }
 
-    if let Some(session) = app.sessions.get(app.active) {
+    if let Some(session) = app.sessions.get_mut(app.active) {
         // Styled chat rendering with Markdown-aware content (basic lists/paragraphs)
         let mut lines: Vec<Line> = Vec::with_capacity(session.messages.len() + 1);
         for msg in &session.messages {
@@ -1116,13 +1156,38 @@ fn render_ui(f: &mut Frame, app: &AppState) {
                 push_current(&mut lines, &mut first_line, &mut current, in_item);
             }
         }
+        let inner_width = chat_area.width.saturating_sub(2) as usize;
+        let effective_width = inner_width.max(1);
+        let viewport_height = usize::from(chat_area.height.saturating_sub(2));
+        let total_rows = total_message_rows(&lines, effective_width);
+        let max_scroll = if viewport_height == 0 {
+            total_rows
+        } else if total_rows > viewport_height {
+            total_rows - viewport_height
+        } else {
+            0
+        };
+        let clamped_max = max_scroll.min(u16::MAX as usize) as u16;
+        session.viewport_height = viewport_height.min(u16::MAX as usize) as u16;
+        session.max_scroll = clamped_max;
+        if session.follow {
+            session.scroll = session.max_scroll;
+        } else if session.scroll > session.max_scroll {
+            session.scroll = session.max_scroll;
+        }
+
+        let mut chat_title = "Chat (PgUp/PgDn/Up/Down to scroll)".to_string();
+        if !session.follow {
+            chat_title.push_str(" — follow paused (End to resume)");
+        }
+
         let paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((session.scroll, 0))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Chat (PgUp/PgDn/Up/Down to scroll)"),
+                    .title(Line::from(chat_title)),
             );
         f.render_widget(paragraph, chat_area);
 

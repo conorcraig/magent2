@@ -19,14 +19,14 @@
 - Full gate: `just check`
 - Tests only: `just test`
 - Clean stack: `just rebuild`
-- TUI: `just run_tui`
+- TUI: `just tui`
 
 ## Project Map
 
 - `magent2/`: Python packages (gateway, worker, tools, bus, runner, observability)
 - `chat_tui/`: Rust TUI (ratatui + crossterm)
 - `tests/`: unit/integration/e2e; Docker‑backed tests in `tests/e2e/`
-- `scripts/`: runner/client helpers; `run_local.py` for dev
+- `scripts/`: runner/client helpers
 - `docs/`: design references and PRD
 - `justfile`: local quality gates
 - `docker-compose.yml`: gateway/worker/redis stack

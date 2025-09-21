@@ -29,7 +29,7 @@ Observer index toggles (see `magent2/observability/index.py` for details):
 The recommended entry point is the Just recipe:
 
 ```bash
-just run_tui
+just tui
 ```
 
 This recipe ensures the Docker stack (gateway, worker, Redis) is running before
@@ -100,13 +100,18 @@ message rather than interrupting the chat flow.
 | `r`                | Refresh conversations while the panel is visible. |
 | `a`                | Toggle the agents pane (auto-refreshes every ~3 s). |
 | `g`                | Toggle the conversation graph pane (refreshes on session change / every ~5 s). |
-| `Up` / `Down`      | Scroll chat or move selection in the panel. |
-| `PageUp` / `PageDown` | Scroll chat faster or jump the panel selection by 10. |
+| `Up` / `Down`      | Scroll chat or move selection in the panel. Leaving the bottom pauses follow mode. |
+| `PageUp` / `PageDown` | Scroll chat faster or jump the panel selection by 10; scrolling up pauses follow mode. |
+| `End`              | Jump to the latest message and resume follow mode. |
 | `Ctrl+L`           | Clear the current session transcript. |
 | `Ctrl+U`           | Clear the input buffer. |
 
 The TUI also supports paste events (Bracketed Paste mode) and preserves
 display scrollback before entering the alternate screen.
+
+When follow mode is active (the default), new messages keep the chat pinned to
+the bottom. Once you scroll away, the header shows “follow paused” until you
+return to the bottom (e.g., via `End`, `PageDown`, or repeated `Down`).
 
 ## Streaming behaviour
 
