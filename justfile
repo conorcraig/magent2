@@ -30,6 +30,14 @@ check:
 	@printf "\033[1;36m==> Ruff: check (apply --fix)\033[0m\n"
 	@uv run --isolated ruff check --fix . |& tee reports/ruff-check.log | sed -E '/^Installed [0-9]+ packages in /d'
 	# Markdown auto-fix (uses local Node via npx)
+	@if command -v cargo >/dev/null 2>&1; then \
+	  printf "\033[1;36m==> Rust: cargo fmt (check)\033[0m\n"; \
+	  cargo fmt --manifest-path chat_tui/Cargo.toml --all -- --check || true; \
+	  printf "\033[1;36m==> Rust: cargo clippy (-D warnings)\033[0m\n"; \
+	  cargo clippy --manifest-path chat_tui/Cargo.toml -- -D warnings; \
+	else \
+	  printf "\033[1;33m==> Skipping Rust checks (cargo not found)\033[0m\n"; \
+	fi
 	@printf "\033[1;36m==> Markdownlint (fix)\033[0m\n"
 	@npx --yes markdownlint-cli2 --fix |& tee reports/markdownlint.log || true
 	# Type checking (mypy-baseline ratchet)
@@ -48,14 +56,6 @@ check:
 	@printf "\033[1;36m==> Pytest\033[0m\n"
 	@uv run --isolated pytest -q --color=yes --durations=10 --junitxml=reports/pytest-junit.xml |& tee reports/pytest.log | sed -E '/^Installed [0-9]+ packages in /d'
 	# Rust: fmt and clippy for chat_tui (if cargo is available)
-	@if command -v cargo >/dev/null 2>&1; then \
-	  printf "\033[1;36m==> Rust: cargo fmt (check)\033[0m\n"; \
-	  cargo fmt --manifest-path chat_tui/Cargo.toml --all -- --check || true; \
-	  printf "\033[1;36m==> Rust: cargo clippy (-D warnings)\033[0m\n"; \
-	  cargo clippy --manifest-path chat_tui/Cargo.toml -- -D warnings; \
-	else \
-	  printf "\033[1;33m==> Skipping Rust checks (cargo not found)\033[0m\n"; \
-	fi
 
 update:
 	# Update all baselines in one go
@@ -125,11 +125,3 @@ lazydocker:
 	  printf "Example (Linux):\n  curl -fsSL https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash\n"; \
 	  exit 127; \
 	fi
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Local (no Docker): gateway + worker in one process
-# ──────────────────────────────────────────────────────────────────────────────
-local:
-	# Run FastAPI gateway (port 8000) and worker using an in-process bus
-	uv run python scripts/run_local.py
