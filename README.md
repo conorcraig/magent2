@@ -171,7 +171,7 @@ Requires LazyDocker. Install: <https://github.com/jesseduffield/lazydocker#insta
 Send a single message and exit after the final output:
 
 ```bash
-uv run python scripts/client.py \
+magent2 client \
   --message "hello" \
   --conv conv-123 \
   --agent DevAgent \
@@ -204,13 +204,13 @@ Examples:
 
 ```bash
 # JSON mode for machine parsing
-uv run python scripts/client.py --message "ping" --json --timeout 10
+magent2 client --message "ping" --json --timeout 10
 
 # Quiet mode for shell scripting
-uv run python scripts/client.py --message "ping" --quiet --timeout 10
+magent2 client --message "ping" --quiet --timeout 10
 
 # Stream only first 5 events
-uv run python scripts/client.py --conv conv-1 --max-events 5
+magent2 client --conv conv-1 --max-events 5
 ```
 
 ## Todo function tools
@@ -246,8 +246,8 @@ After syncing deps, the CLI provides simple workflows:
 # Ensure Docker stack (redis, gateway, worker)
 magent2 ensure
 
-# Launch UI. If `chat_tui/` exists, runs `cargo run` there; otherwise launches Python client.
-magent2 run
+# Launch the Rust TUI (ensures stack if needed)
+just run_tui
 
 # Launch Python client directly (no Docker ensure)
 magent2 client --base-url auto --agent DevAgent
@@ -282,8 +282,8 @@ Features:
 
 Notes:
 
-- The top-level `magent2 run` will auto-launch the Rust TUI when `chat_tui/` is present.
-- When the TUI is unavailable, the Python client is used as a fallback.
+- Use `just run_tui` to spin up the stack and launch the Rust TUI when `chat_tui/`
+  is present.
 
 ## Configuration
 
