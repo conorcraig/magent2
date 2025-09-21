@@ -66,6 +66,7 @@ struct AppState {
     agent_name: String,
     show_conversations: bool,
     conversations: Vec<String>,
+    conversations_selected: usize,
 }
 
 impl AppState {
@@ -98,6 +99,7 @@ impl AppState {
             agent_name: std::env::var("MAGENT2_AGENT_NAME").unwrap_or_else(|_| "DevAgent".to_string()),
             show_conversations: false,
             conversations: Vec::new(),
+            conversations_selected: 0,
         }
     }
 }
@@ -225,6 +227,17 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             if app.show_conversations {
                 let list = fetch_conversations(&app.base_url).await;
                 app.conversations = list;
+                app.conversations_selected = 0;
+            }
+        }
+        KeyCode::Char('r') => {
+            if app.show_conversations {
+                let list = fetch_conversations(&app.base_url).await;
+                app.conversations = list;
+                if app.conversations_selected >= app.conversations.len() {
+                    if app.conversations.is_empty() { app.conversations_selected = 0; }
+                    else { app.conversations_selected = app.conversations.len().saturating_sub(1); }
+                }
             }
         }
         KeyCode::Backspace => {
@@ -233,8 +246,27 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             }
         }
         KeyCode::Enter => {
-            let idx = app.active;
-            if let Some(session) = app.sessions.get_mut(idx) {
+            if app.show_conversations {
+                // Switch to selected conversation and start SSE
+                if let Some(sel_id) = app.conversations.get(app.conversations_selected).cloned() {
+                    let idx = app.active;
+                    if let Some(session) = app.sessions.get_mut(idx) {
+                        session.gen = session.gen.saturating_add(1);
+                        let gen = session.gen;
+                        if let Some(h) = session.stream_task.take() { h.abort(); }
+                        session.last_sse_id = None;
+                        session.messages.clear();
+                        session.conversation_id = Some(sel_id.clone());
+                        let handle = spawn_sse_task(
+                            app.base_url.clone(), idx, gen, app.tx.clone(), sel_id, None,
+                        );
+                        if let Some(s) = app.sessions.get_mut(idx) { s.stream_task = Some(handle); }
+                        app.show_conversations = false;
+                    }
+                }
+            } else {
+                let idx = app.active;
+                if let Some(session) = app.sessions.get_mut(idx) {
                 let input = std::mem::take(&mut session.input);
                 // Increment generation to invalidate any prior stream tasks for this session
                 session.gen = session.gen.saturating_add(1);
@@ -338,23 +370,34 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
             app.active = app.sessions.len() - 1;
         }
         KeyCode::Up => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
+            if app.show_conversations {
+                if app.conversations_selected > 0 { app.conversations_selected -= 1; }
+            } else if let Some(session) = app.sessions.get_mut(app.active) {
                 if session.scroll > 0 { session.scroll -= 1; }
             }
         }
         KeyCode::Down => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
+            if app.show_conversations {
+                let max = app.conversations.len().saturating_sub(1);
+                if app.conversations_selected < max { app.conversations_selected += 1; }
+            } else if let Some(session) = app.sessions.get_mut(app.active) {
                 // naive increment; rendering will clamp visually
                 session.scroll = session.scroll.saturating_add(1);
             }
         }
         KeyCode::PageUp => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
+            if app.show_conversations {
+                let dec = app.conversations_selected.saturating_sub(10);
+                app.conversations_selected = dec;
+            } else if let Some(session) = app.sessions.get_mut(app.active) {
                 session.scroll = session.scroll.saturating_sub(10);
             }
         }
         KeyCode::PageDown => {
-            if let Some(session) = app.sessions.get_mut(app.active) {
+            if app.show_conversations {
+                let max = app.conversations.len().saturating_sub(1);
+                app.conversations_selected = (app.conversations_selected + 10).min(max);
+            } else if let Some(session) = app.sessions.get_mut(app.active) {
                 session.scroll = session.scroll.saturating_add(10);
             }
         }
@@ -423,10 +466,14 @@ fn render_ui(f: &mut Frame, app: &AppState) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(28), Constraint::Min(5)])
             .split(chunks[1]);
-        let conv_text = if app.conversations.is_empty() {
-            "(no conversations)".to_string()
-        } else {
-            app.conversations.join("\n")
+        let conv_text = if app.conversations.is_empty() { "(no conversations)".to_string() } else {
+            let mut out = String::new();
+            for (i, id) in app.conversations.iter().enumerate() {
+                if i == app.conversations_selected { out.push_str("> "); } else { out.push_str("  "); }
+                out.push_str(id);
+                out.push('\n');
+            }
+            out
         };
         let conv = Paragraph::new(conv_text)
             .block(Block::default().borders(Borders::ALL).title("Conversations (c to toggle)"));
@@ -459,6 +506,49 @@ fn render_ui(f: &mut Frame, app: &AppState) {
         let input = Paragraph::new(session.input.clone()).block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Tab switch, F2 new, Esc quit)"));
         f.render_widget(input, chunks[2]);
     }
+}
+
+fn spawn_sse_task(
+    base: String,
+    idx: usize,
+    gen: u64,
+    tx: UnboundedSender<UiEvent>,
+    conversation_id: String,
+    resume_id: Option<String>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let client = Client::new();
+        let url = format!("{}/stream/{}", base, conversation_id);
+        let mut req = client.get(&url);
+        if let Some(id) = resume_id { if !id.is_empty() { req = req.header("Last-Event-ID", id); } }
+        if let Ok(resp) = req.send().await {
+            if resp.status().is_success() {
+                let mut bytes_stream = resp.bytes_stream();
+                let mut buf: Vec<u8> = Vec::new();
+                while let Some(item) = bytes_stream.next().await {
+                    match item {
+                        Ok(chunk) => {
+                            for b in chunk {
+                                if b == b'\n' {
+                                    if let Ok(line) = String::from_utf8(buf.clone()) {
+                                        let s = line.trim_end_matches('\r');
+                                        if s.starts_with("id: ") {
+                                            let id = s[4..].trim().to_string();
+                                            let _ = tx.send(UiEvent::SetLastId { idx, gen, id });
+                                        } else {
+                                            handle_sse_line(&line, idx, gen, &tx);
+                                        }
+                                    }
+                                    buf.clear();
+                                } else { buf.push(b); }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+    })
 }
 
 fn pre_init_terminal() -> io::Result<()> {
