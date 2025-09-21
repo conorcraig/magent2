@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from functools import lru_cache
@@ -13,9 +12,9 @@ from typing import Any
 import pytest
 from _pytest.terminal import TerminalReporter
 
+# ROOT is defined for reference but we don't need to manipulate sys.path
+# since we're using proper Python packaging
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 @pytest.fixture(scope="session")
