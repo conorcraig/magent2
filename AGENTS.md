@@ -84,12 +84,20 @@
 ## GitHub Workflow
 
 - Policy: prefer `gh` CLI for repo operations; fall back to HTTPS API only if `gh` is unavailable.
-- Issues: use epics and link sub‑issues; prefer milestones; no labels; add short progress comments with commit hashes; close issues you created when done (unless told otherwise).
-- Creating/updating issues: link related epics; capture acceptance criteria and validation steps; avoid repo‑specific jargon; include exact commands when useful.
+- When a `gh …` command needs to hit GitHub's API, run it with `with_escalated_permissions=true` and include a short justification; sandboxed environments otherwise block the request (watch for errors like "failed to retrieve the owner of the repository").
+- Issues: use epics and link sub-issues; prefer milestones; no labels; add short progress comments with commit hashes; close issues you created when done (unless told otherwise).
+- Creating/updating issues: link related epics; capture acceptance criteria and validation steps; avoid repo-specific jargon; include exact commands when useful.
 - Pull requests: do not open via CLI unless asked; include “How to verify” and rollback notes for infra/deps changes.
 - Investigate CI: `gh pr list --state open`; `gh pr checks <pr>`; `gh run list --limit 10`; `gh run view <run_id> --log-failed`.
 - Work on PRs: `gh pr checkout <pr>`; then `git add <files>`; `git commit -m "message"`; `git push`.
 - Monitor CI: after pushing, `gh pr checks <pr>`; wait for all green.
+
+### Milestones
+
+- We use milestones to group issues by phase/outcome
+- When creating isuses, assign the appropriate milestone
+- Close a milestone when all included issues are done
+- Example commands: `gh milestone list`; `gh issue list --milestone "<milestone name>" --state open` (run with escalated permissions when required by the environment).
 
 ## Exceptions
 
