@@ -97,6 +97,7 @@
 - We use milestones to group issues by phase/outcome
 - When creating isuses, assign the appropriate milestone
 - Close a milestone when all included issues are done
+- When multiple milestones are open, confirm which one is currently being worked on (infer from name, associated issues in work, etc).
 - Example commands: `gh milestone list`; `gh issue list --milestone "<milestone name>" --state open` (run with escalated permissions when required by the environment).
 
 ## Exceptions
