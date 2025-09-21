@@ -46,7 +46,11 @@ def _truncate_payload_for_sse(payload: dict[str, Any], cap_bytes: int | None) ->
         s = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if len(s) <= cap_bytes:
             return payload
-    except Exception:
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to serialize payload for SSE size check: {exc}")
         return _create_minimal_truncated_payload(payload, cap_bytes)
 
     # Truncate `text` if present
@@ -80,8 +84,11 @@ def _truncate_text_field(payload: dict[str, Any], cap_bytes: int) -> dict[str, A
 
         if len(json.dumps(base, separators=(",", ":")).encode("utf-8")) <= cap_bytes:
             return base
-    except Exception:
-        pass
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to serialize truncated payload: {exc}")
     return None
 
 
@@ -103,8 +110,12 @@ def _create_minimal_truncated_payload(payload: dict[str, Any], cap_bytes: int) -
         minimal_json = json.dumps(minimal, separators=(",", ":")).encode("utf-8")
         if len(minimal_json) <= cap_bytes:
             return minimal
-    except Exception:
-        pass
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        # If minimal creation fails, return a very basic fallback
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to create minimal truncated payload: {exc}")
     return {"event": "truncated"}
 
 

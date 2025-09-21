@@ -21,9 +21,12 @@ def _read_instructions() -> str:
         try:
             with open(path, encoding="utf-8") as f:
                 return f.read()
-        except Exception:
+        except (FileNotFoundError, PermissionError, OSError) as exc:
             # Fallback to env if file missing/unreadable
-            pass
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not read instructions file '{path}': {exc}")
     return os.getenv("AGENT_INSTRUCTIONS", "You are a helpful assistant.")
 
 
@@ -42,7 +45,12 @@ def load_config(env: dict[str, str] | None = None) -> RunnerConfig:
     max_turns_raw = (e.get("AGENT_MAX_TURNS") or "").strip()
     try:
         max_turns_val = int(max_turns_raw) if max_turns_raw else 10
-    except Exception:
+    except (ValueError, TypeError) as exc:
+        # Invalid integer value, fallback to default
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid AGENT_MAX_TURNS value '{max_turns_raw}': {exc}")
         max_turns_val = 10
     max_turns = max(1, max_turns_val)
     return RunnerConfig(

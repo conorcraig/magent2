@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -52,7 +53,12 @@ def _build_passthrough(args: Any, keys: list[str], extra: list[str]) -> list[str
 def _launch_rust_tui() -> int:
     """Launch the Rust TUI via cargo and return its exit code."""
     try:
-        return int(subprocess.call("cd chat_tui && cargo run", shell=True))
+        original_cwd = os.getcwd()
+        os.chdir("chat_tui")
+        try:
+            return int(subprocess.call(["cargo", "run"], shell=False))
+        finally:
+            os.chdir(original_cwd)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: failed to launch Rust TUI: {exc}\n")
         return 1
@@ -71,12 +77,18 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("ensure", help="Ensure Docker stack (redis, gateway, worker) is up")
 
-    # 'run' ensures stack then launches interactive client for now (TUI later)
+    # 'run' ensures the stack is ready, then launches either the Python client or the TUI.
     p_run = sub.add_parser(
         "run",
-        help="Ensure stack and launch UI (Rust TUI if present; fallback to Python client)",
+        help="Ensure stack and launch a UI surface (default: streaming client)",
     )
-    # Pass-through common args to client; keep minimal to avoid divergence
+    p_run.add_argument("--skip-ensure", action="store_true", help="Skip docker stack startup")
+    p_run.add_argument(
+        "--ui",
+        choices=["client", "tui"],
+        default="client",
+        help="Select the UI surface. Additional surfaces can be added here later.",
+    )
     p_run.add_argument("--base-url", default="auto")
     p_run.add_argument("--agent", default="DevAgent")
     p_run.add_argument("--conv")
@@ -104,21 +116,18 @@ def main(argv: list[str] | None = None) -> None:
     p_client.add_argument("--timeout", type=float)
 
     args, extra = parser.parse_known_args(argv)
-    cmd = str(getattr(args, "cmd", "run") or "run")
+    cmd = getattr(args, "cmd", None)
 
     if cmd == "ensure":
         code = ensure_stack()
         raise SystemExit(code)
 
     if cmd == "run":
-        code = ensure_stack()
-        if code != 0:
-            raise SystemExit(code)
-        # If Rust TUI exists, launch it; otherwise fall back to Python client
-        import os
-
-        tui_manifest = os.path.join(os.getcwd(), "chat_tui", "Cargo.toml")
-        if os.path.isfile(tui_manifest):
+        if not args.skip_ensure:
+            code = ensure_stack()
+            if code != 0:
+                raise SystemExit(code)
+        if args.ui == "tui":
             raise SystemExit(_launch_rust_tui())
         keys = [
             "base_url",
@@ -153,6 +162,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Default to help if unknown
     parser.print_help()
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":
