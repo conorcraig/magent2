@@ -273,7 +273,9 @@ Features:
 - Multi-session tabs (`Tab` to switch, `F2` new session)
 - Paste support and enhanced key handling
 - Streams from `/stream/{conversation_id}` and posts via `/send`
-- Toggle a tools pane (`F3`) that renders `tool_step` events
+- Conversations panel: `c` toggle, Up/Down/PageUp/PageDown to select, `r` refresh, `Enter` to switch (stops old SSE, starts new)
+- Markdown-aware rendering for agent messages (lists, paragraphs)
+- Toggle a tools pane (`F3`) that renders `tool_step` events (planned)
 
 Notes:
 
