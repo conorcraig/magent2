@@ -8,7 +8,6 @@ use crossterm::event::{
 };
 use crossterm::terminal::ScrollUp;
 use crossterm::{cursor, execute};
-use futures_util::StreamExt;
 use ratatui::prelude::*;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
@@ -19,6 +18,20 @@ use tokio::task::JoinHandle;
 use pulldown_cmark::{Event as MdEvent, Options as MdOptions, Parser as MdParser, Tag, TagEnd};
 use serde::Deserialize;
 use unicode_width::UnicodeWidthStr;
+
+mod sse;
+
+/// Create a shared HTTP client with proper configuration
+/// - Connection timeout for reliability
+/// - TCP keepalive to maintain connections
+/// - No global timeout (important for SSE streams)
+fn create_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .tcp_keepalive(Duration::from_secs(60))
+        .build()
+        .expect("Failed to create HTTP client")
+}
 
 const SPINNER_FRAMES: [&str; 4] = [".", "..", "...", ".."];
 const AGENTS_REFRESH_MS: u64 = 3_000;
@@ -165,6 +178,7 @@ struct AppState {
     graph_last_fetch: Option<Instant>,
     graph_error: Option<String>,
     focus: FocusTarget,
+    http_client: Client,
 }
 
 impl ChatSession {
@@ -192,6 +206,7 @@ impl ChatSession {
 impl AppState {
     fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
+        let http_client = create_http_client();
         // Determine base URL (auto-discover via docker compose if requested)
         let env_base = std::env::var("MAGENT2_BASE_URL").unwrap_or_else(|_| "auto".to_string());
         let base_url = if env_base.to_lowercase() == "auto" {
@@ -235,6 +250,7 @@ impl AppState {
             graph_last_fetch: None,
             graph_error: None,
             focus: FocusTarget::Input,
+            http_client,
         }
     }
 }
@@ -252,14 +268,13 @@ async fn main() -> std::io::Result<()> {
     // Enable bracketed paste and enhanced keyboard flags for better UX
     enable_terminal_features()?;
     let mut app = AppState::new();
-    let client = Client::new();
     let mut last_health = Instant::now() - Duration::from_secs(2);
 
     loop {
         // Periodic gateway health probe (best-effort)
         if last_health.elapsed() >= Duration::from_millis(750) {
             let url = format!("{}/health", app.base_url);
-            let ok = match client
+            let ok = match app.http_client
                 .get(&url)
                 .timeout(Duration::from_millis(1200))
                 .send()
@@ -395,7 +410,7 @@ async fn main() -> std::io::Result<()> {
                 .unwrap_or(true);
             if refresh_due {
                 let base_url = app.base_url.clone();
-                match fetch_agents(&base_url).await {
+                match fetch_agents(&base_url, &app.http_client).await {
                     Ok(rows) => {
                         app.agents = rows;
                         app.agents_error = None;
@@ -424,7 +439,7 @@ async fn main() -> std::io::Result<()> {
                     .unwrap_or(true);
                 if needs_new_conv || stale {
                     let base_url = app.base_url.clone();
-                    match fetch_graph(&base_url, &conv).await {
+                    match fetch_graph(&base_url, &conv, &app.http_client).await {
                         Ok(graph) => {
                             app.graph = Some(graph);
                             app.graph_error = None;
@@ -500,7 +515,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     'c' => {
                         app.show_conversations = !app.show_conversations;
                         if app.show_conversations {
-                            let list = fetch_conversations(&app.base_url).await;
+                            let list = fetch_conversations(&app.base_url, &app.http_client).await;
                             app.conversations = list;
                             app.conversations_selected = 0;
                             app.focus = FocusTarget::Conversations;
@@ -511,7 +526,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     }
                     'r' => {
                         if app.show_conversations {
-                            let list = fetch_conversations(&app.base_url).await;
+                            let list = fetch_conversations(&app.base_url, &app.http_client).await;
                             app.conversations = list;
                             if app.conversations_selected >= app.conversations.len() {
                                 if app.conversations.is_empty() {
@@ -527,7 +542,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     'a' => {
                         app.show_agents = !app.show_agents;
                         if app.show_agents {
-                            match fetch_agents(&app.base_url).await {
+                            match fetch_agents(&app.base_url, &app.http_client).await {
                                 Ok(rows) => {
                                     app.agents = rows;
                                     app.agents_error = None;
@@ -552,7 +567,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                                 .get(app.active)
                                 .and_then(|s| s.conversation_id.clone());
                             if let Some(conv) = conversation_id {
-                                match fetch_graph(&app.base_url, &conv).await {
+                                match fetch_graph(&app.base_url, &conv, &app.http_client).await {
                                     Ok(graph) => {
                                         app.graph = Some(graph);
                                         app.graph_error = None;
@@ -615,6 +630,7 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                             app.tx.clone(),
                             sel_id,
                             None,
+                            app.http_client.clone(),
                         );
                         if let Some(s) = app.sessions.get_mut(idx) {
                             s.stream_task = Some(handle);
@@ -650,10 +666,15 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                     }
                     // Snapshot last id to resume from the correct position (avoid replaying history)
                     let resume_id = session.last_sse_id.clone();
+                    // Capture values needed for async block
+                    let http_client = app.http_client.clone();
+                    let agent_name = app.agent_name.clone();
+                    let tx_clone = app.tx.clone();
+
                     let send_body = serde_json::json!({
                         "conversation_id": conversation_id,
                         "sender": "user:tui",
-                        "recipient": format!("agent:{}", app.agent_name),
+                        "recipient": format!("agent:{}", agent_name),
                         "type": "message",
                         "content": input.clone(),
                     });
@@ -668,10 +689,13 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                         });
                     } else {
                         session.set_busy(BusyReason::WaitingResponse);
+
+                        // Use unified SSE streaming
                         let handle = tokio::spawn(async move {
-                            let client = Client::new();
+                            let client = http_client;
                             match client
                                 .post(format!("{}/send", base))
+                                .timeout(Duration::from_secs(10))
                                 .json(&send_body)
                                 .send()
                                 .await
@@ -680,12 +704,12 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                                     if !resp.status().is_success() {
                                         let status = resp.status();
                                         let text = format!("[error] send failed: {}", status);
-                                        let _ = tx.send(UiEvent::Tool {
+                                        let _ = tx_clone.send(UiEvent::Tool {
                                             idx,
                                             gen,
                                             text: text.clone(),
                                         });
-                                        let _ = tx.send(UiEvent::StreamError {
+                                        let _ = tx_clone.send(UiEvent::StreamError {
                                             idx,
                                             gen,
                                             message: format!("send failed ({})", status),
@@ -694,12 +718,12 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                                     }
                                 }
                                 Err(_) => {
-                                    let _ = tx.send(UiEvent::Tool {
+                                    let _ = tx_clone.send(UiEvent::Tool {
                                         idx,
                                         gen,
                                         text: "[error] send failed".to_string(),
                                     });
-                                    let _ = tx.send(UiEvent::StreamError {
+                                    let _ = tx_clone.send(UiEvent::StreamError {
                                         idx,
                                         gen,
                                         message: "send failed".to_string(),
@@ -707,87 +731,17 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
                                     return;
                                 }
                             }
-                            // Stream SSE line-by-line; handle data: JSON payloads
-                            let url = format!("{}/stream/{}", base, conversation_id);
-                            let mut req = client.get(&url);
-                            if let Some(id) = resume_id {
-                                if !id.is_empty() {
-                                    req = req.header("Last-Event-ID", id);
-                                }
-                            }
-                            match req.send().await {
-                                Ok(resp) => {
-                                    if resp.status().is_success() {
-                                        let mut bytes_stream = resp.bytes_stream();
-                                        let mut buf: Vec<u8> = Vec::new();
-                                        let mut errored = false;
-                                        while let Some(item) = bytes_stream.next().await {
-                                            match item {
-                                                Ok(chunk) => {
-                                                    for b in chunk {
-                                                        if b == b'\n' {
-                                                            if let Ok(line) =
-                                                                String::from_utf8(buf.clone())
-                                                            {
-                                                                let s = line.trim_end_matches('\r');
-                                                                if let Some(stripped) =
-                                                                    s.strip_prefix("id: ")
-                                                                {
-                                                                    let id =
-                                                                        stripped.trim().to_string();
-                                                                    let _ = tx.send(
-                                                                        UiEvent::SetLastId {
-                                                                            idx,
-                                                                            gen,
-                                                                            id,
-                                                                        },
-                                                                    );
-                                                                } else {
-                                                                    handle_sse_line(
-                                                                        &line, idx, gen, &tx,
-                                                                    );
-                                                                }
-                                                            }
-                                                            buf.clear();
-                                                        } else {
-                                                            buf.push(b);
-                                                        }
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    errored = true;
-                                                    let _ = tx.send(UiEvent::StreamError {
-                                                        idx,
-                                                        gen,
-                                                        message: "stream interrupted".to_string(),
-                                                    });
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if !errored {
-                                            let _ = tx.send(UiEvent::StreamClosed { idx, gen });
-                                        }
-                                    } else {
-                                        let status = resp.status();
-                                        let text = format!("stream failed with status {}", status);
-                                        let _ = tx.send(UiEvent::StreamError {
-                                            idx,
-                                            gen,
-                                            message: text,
-                                        });
-                                    }
-                                }
-                                Err(_) => {
-                                    let _ = tx.send(UiEvent::StreamError {
-                                        idx,
-                                        gen,
-                                        message: "stream request failed".to_string(),
-                                    });
-                                }
-                            }
+                            // Use unified SSE streaming
+                            tokio::spawn(sse::spawn_unified_sse_task(
+                                base,
+                                conversation_id,
+                                resume_id,
+                                idx,
+                                gen,
+                                tx_clone,
+                                client,
+                            ));
                         });
-                        // Store handle so we can abort next time
                         if let Some(session2) = app.sessions.get_mut(idx) {
                             session2.stream_task = Some(handle);
                         }
@@ -884,10 +838,14 @@ async fn handle_key_event(key: KeyEvent, app: &mut AppState) -> bool {
     false
 }
 
-async fn fetch_conversations(base_url: &str) -> Vec<String> {
+async fn fetch_conversations(base_url: &str, client: &Client) -> Vec<String> {
     let url = format!("{}/conversations", base_url);
-    let client = Client::new();
-    match client.get(&url).send().await {
+    match client
+        .get(&url)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+    {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
             Ok(v) => {
                 let mut out: Vec<String> = Vec::new();
@@ -923,11 +881,11 @@ struct AgentItem {
     recent_conversations: Vec<String>,
 }
 
-async fn fetch_agents(base_url: &str) -> Result<Vec<AgentRow>, String> {
+async fn fetch_agents(base_url: &str, client: &Client) -> Result<Vec<AgentRow>, String> {
     let url = format!("{}/agents", base_url);
-    let client = Client::new();
     let resp = client
         .get(&url)
+        .timeout(Duration::from_secs(6))
         .send()
         .await
         .map_err(|err| format!("agents request failed: {}", err))?;
@@ -986,11 +944,11 @@ struct GraphEdgeDto {
     count: i64,
 }
 
-async fn fetch_graph(base_url: &str, conversation_id: &str) -> Result<GraphData, String> {
+async fn fetch_graph(base_url: &str, conversation_id: &str, client: &Client) -> Result<GraphData, String> {
     let url = format!("{}/graph/{}", base_url, conversation_id);
-    let client = Client::new();
     let resp = client
         .get(&url)
+        .timeout(Duration::from_secs(8))
         .send()
         .await
         .map_err(|err| format!("graph request failed: {}", err))?;
@@ -1445,46 +1403,17 @@ fn spawn_sse_task(
     tx: UnboundedSender<UiEvent>,
     conversation_id: String,
     resume_id: Option<String>,
+    client: Client,
 ) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let client = Client::new();
-        let url = format!("{}/stream/{}", base, conversation_id);
-        let mut req = client.get(&url);
-        if let Some(id) = resume_id {
-            if !id.is_empty() {
-                req = req.header("Last-Event-ID", id);
-            }
-        }
-        if let Ok(resp) = req.send().await {
-            if resp.status().is_success() {
-                let mut bytes_stream = resp.bytes_stream();
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(item) = bytes_stream.next().await {
-                    match item {
-                        Ok(chunk) => {
-                            for b in chunk {
-                                if b == b'\n' {
-                                    if let Ok(line) = String::from_utf8(buf.clone()) {
-                                        let s = line.trim_end_matches('\r');
-                                        if let Some(stripped) = s.strip_prefix("id: ") {
-                                            let id = stripped.trim().to_string();
-                                            let _ = tx.send(UiEvent::SetLastId { idx, gen, id });
-                                        } else {
-                                            handle_sse_line(&line, idx, gen, &tx);
-                                        }
-                                    }
-                                    buf.clear();
-                                } else {
-                                    buf.push(b);
-                                }
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        }
-    })
+    tokio::spawn(sse::spawn_unified_sse_task(
+        base,
+        conversation_id,
+        resume_id,
+        idx,
+        gen,
+        tx,
+        client,
+    ))
 }
 
 fn pre_init_terminal() -> io::Result<()> {
@@ -1584,77 +1513,5 @@ fn format_elapsed_compact(dur: Duration) -> String {
         format!("{}.{:01}s", secs, tenths)
     } else {
         format!("{}ms", dur.as_millis())
-    }
-}
-
-// Parse one SSE line and forward interesting events to the UI channel
-fn handle_sse_line(line: &str, idx: usize, gen: u64, tx: &UnboundedSender<UiEvent>) {
-    let s = line.trim_end_matches('\r');
-    if s.is_empty() || s.starts_with(':') {
-        return;
-    }
-    if let Some(data) = s.strip_prefix("data: ") {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-            let ev = v.get("event").and_then(|x| x.as_str()).unwrap_or("");
-            match ev {
-                "token" => {
-                    if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::ModelToken {
-                            idx,
-                            gen,
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                "output" => {
-                    if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::ModelOutput {
-                            idx,
-                            gen,
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                "tool_step" => {
-                    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
-                    let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
-                    let summary = v
-                        .get("result_summary")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("");
-                    let line = if summary.is_empty() {
-                        format!("[tool:{}] {}", status, name)
-                    } else {
-                        format!("[tool:{}] {}: {}", status, name, summary)
-                    };
-                    let _ = tx.send(UiEvent::ToolStep {
-                        idx,
-                        gen,
-                        name: name.to_string(),
-                        status: status.to_string(),
-                        summary: if summary.is_empty() {
-                            None
-                        } else {
-                            Some(summary.to_string())
-                        },
-                    });
-                    let _ = tx.send(UiEvent::Tool {
-                        idx,
-                        gen,
-                        text: line,
-                    });
-                }
-                "user_message" => {
-                    if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                        let _ = tx.send(UiEvent::User {
-                            idx,
-                            gen,
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
     }
 }
